@@ -1,0 +1,22 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group 'com.fakhruddin.wavegram'
+version '1.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation 'mysql:mysql-connector-java:8.0.29' //For server
+    implementation 'org.bouncycastle:bcpkix-jdk15on:1.70'
+    implementation group: 'org.json', name: 'json', version: '20220320'
+
+}
+
+sourceCompatibility = JavaVersion.VERSION_16
+targetCompatibility = JavaVersion.VERSION_16
