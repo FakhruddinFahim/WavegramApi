@@ -3,6 +3,7 @@ package com.fakhruddin.mtproto.client;
 import com.fakhruddin.mtproto.*;
 import com.fakhruddin.mtproto.protocol.AbridgedProtocol;
 import com.fakhruddin.mtproto.protocol.Protocol;
+import com.fakhruddin.mtproto.protocol.WebSocketProtocol;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.core.*;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
@@ -12,6 +13,8 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -143,11 +146,12 @@ public class MTProtoClient extends TcpSocket {
 
     /**
      * Perfect Forward Secrecy
+     *
      * @param PFS true to enable PFS
      */
     public void setPFS(boolean PFS) {
         this.PFS = PFS;
-        if (!this.PFS && tempAuthScheduleFuture != null){
+        if (!this.PFS && tempAuthScheduleFuture != null) {
             tempAuthScheduleFuture.cancel(true);
         }
     }
@@ -280,6 +284,36 @@ public class MTProtoClient extends TcpSocket {
         createTempAuthKey = false;
         authRetryId = -1;
         try {
+            if (protocol instanceof WebSocketProtocol) {
+                ((WebSocketProtocol) protocol).isClient = true;
+                String key = Base64.getEncoder().encodeToString(CryptoUtils.randomBytes(16));
+                String header = "GET /apiws HTTP/1.1\r\n" +
+                        "Connection: Upgrade\r\n" +
+                        "Upgrade: websocket\r\n" +
+                        "Sec-WebSocket-Protocol: binary\r\n" +
+                        "Sec-WebSocket-Key: " + key + "\r\n" +
+                        "Sec-WebSocket-Version: 13\r\n" +
+                        "User-Agent: WavegramApi\r\n\r\n";
+                outputStream.write(header.getBytes());
+                Scanner s = new Scanner(inputStream, "UTF-8");
+                String data = s.useDelimiter("\r\n\r\n").next();
+                if (data.startsWith("HTTP/1.1 101 Switching Protocols")) {
+                    Matcher match = Pattern.compile("Sec-WebSocket-Accept: (.*)").matcher(data);
+                    Matcher protocolMatcher = Pattern.compile("Sec-WebSocket-Protocol: binary").matcher(data);
+                    if (!protocolMatcher.find()) {
+                        throw new IllegalStateException("http header Sec-WebSocket-Protocol: binary not found");
+                    }
+                    if (match.find()) {
+                        String calcKey = Base64.getEncoder().encodeToString(CryptoUtils.SHA1(
+                                (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").getBytes()));
+                        if (!calcKey.equalsIgnoreCase(match.group(1))) {
+                            throw new SecurityException("calculated Sec-WebSocket-Accept value does not matched");
+                        }
+                    }
+                } else {
+                    throw new SecurityException(data.substring(0, data.indexOf("\r\n")));
+                }
+            }
             protocol.writeTag(outputStream);
             if (clientManager != null && (authKey = clientManager.getAuthKey(dcId, AuthKey.Type.PERM_AUTH_KEY)) != null) {
                 session = clientManager.getSession(dcId);
@@ -407,6 +441,7 @@ public class MTProtoClient extends TcpSocket {
                     onTransportError(transportException.getErrorCode());
                     break;
                 } catch (Exception e) {
+                    e.printStackTrace();
                     reconnect();
                     break;
                 }
@@ -739,9 +774,6 @@ public class MTProtoClient extends TcpSocket {
 
         byte[] clientDHInnerDataEncrypted = CryptoUtils.AES256IGEEncrypt(clientDHInnerDataWithHash, tmpAesIv, tmpAesKey);
 
-        System.out.println(TAG + ".computeAuthKey: dec " + Arrays.toString(clientDHInnerDataWithHash));
-        System.out.println(TAG + ".computeAuthKey: enc " + Arrays.toString(clientDHInnerDataEncrypted));
-
         MTProtoScheme.SetClientDHParams setClientDhParams = new MTProtoScheme.SetClientDHParams();
         if (pqInnerData instanceof MTProtoScheme.PQInnerDataDc pqInnerDataDc) {
             setClientDhParams.nonce = pqInnerDataDc.nonce;
@@ -916,8 +948,6 @@ public class MTProtoClient extends TcpSocket {
                         CryptoUtils.SHA1(newNonce, newNonce)),
                 CryptoUtils.substring(newNonce, 0, 4)
         );
-        System.out.println(TAG + ".processServerDHParams: aesKey " + Arrays.toString(tmpAesKey));
-        System.out.println(TAG + ".processServerDHParams: aesiv " + Arrays.toString(tmpAesIv));
         byte[] serverDHInnerDataDecrypted = CryptoUtils.AES256IGEDecrypt(serverDHParamsOk.encryptedAnswer, tmpAesIv, tmpAesKey);
         TLInputStream serverDHInnerDataStream = new TLInputStream(serverDHInnerDataDecrypted);
         byte[] serverDHInnerDataHash = serverDHInnerDataStream.readBytes(20);
@@ -1279,7 +1309,7 @@ public class MTProtoClient extends TcpSocket {
 
         }
 
-        if (!executorService.isShutdown()){
+        if (!executorService.isShutdown()) {
             executorService.execute(() -> {
                 try {
                     TLOutputStream messageOutputStream = new TLOutputStream();

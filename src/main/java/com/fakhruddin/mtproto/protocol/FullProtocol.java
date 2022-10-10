@@ -33,11 +33,11 @@ public class FullProtocol extends Protocol {
         outputStream.write(getTag());
     }
 
-    public byte[] readMsg(InputStream inputStream, byte a) throws IOException {
+    public byte[] readMsg(InputStream inputStream, byte[] a) throws IOException {
         byte[] lengthBytes = new byte[4];
-        lengthBytes[0] = a;
-        lengthBytes[1] = (byte) inputStream.read();
-        lengthBytes[2] = (byte) inputStream.read();
+        lengthBytes[0] = a[0];
+        lengthBytes[1] = a[1];
+        lengthBytes[2] = a[2];
         lengthBytes[3] = (byte) inputStream.read();
         int length = new TLInputStream(lengthBytes).readInt();
         byte[] buffer = readBytes(length > 0 ? length - 4 : 0, inputStream);

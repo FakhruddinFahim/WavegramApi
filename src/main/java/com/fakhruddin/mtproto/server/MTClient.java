@@ -1,11 +1,7 @@
 package com.fakhruddin.mtproto.server;
 
-import com.fakhruddin.mtproto.RsaKey;
 import com.fakhruddin.mtproto.*;
-import com.fakhruddin.mtproto.protocol.AbridgedProtocol;
-import com.fakhruddin.mtproto.protocol.FullProtocol;
-import com.fakhruddin.mtproto.protocol.IntermediateProtocol;
-import com.fakhruddin.mtproto.protocol.Protocol;
+import com.fakhruddin.mtproto.protocol.*;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.core.*;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
@@ -23,6 +19,8 @@ import java.math.BigInteger;
 import java.security.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Created by Fakhruddin Fahim on 7/22/2022
@@ -67,12 +65,14 @@ public class MTClient {
      */
     private final List<Long> ackedRecvMsgs = new LinkedList<>();
     private int tempAuthKeyExpireSec = 0;
+    private String wsPath = "/apiws";
 
     public MTClient(InputStream inputStream, OutputStream outputStream) {
         this.inputStream = inputStream;
         this.outputStream = outputStream;
         scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
         executorService = Executors.newCachedThreadPool();
+        session.setClient(false);
     }
 
     public boolean isConnected() {
@@ -107,10 +107,15 @@ public class MTClient {
         this.serverManager = serverManager;
     }
 
+    public void setWsPath(String wsPath) {
+        this.wsPath = wsPath;
+    }
+
     public void start() {
         System.out.println(TAG + ".start: " + this);
         executorService.submit(() -> {
             try {
+                session.setUniqueId(CryptoUtils.randomLong());
                 IntermediateProtocol intermediateProtocol = new IntermediateProtocol();
                 AbridgedProtocol abridgedProtocol = new AbridgedProtocol();
                 int a = inputStream.read();
@@ -131,34 +136,61 @@ public class MTClient {
                         protocol = abridgedProtocol;
                     }
                 } else {
-                    protocol = new FullProtocol();
+                    byte[] tag = new byte[3];
+                    tag[0] = (byte) a;
+                    inputStream.read(tag, 1, 2);
+                    if (new String(tag).equalsIgnoreCase("GET")) {
+                        Scanner s = new Scanner(inputStream, "UTF-8");
+                        String data = s.useDelimiter("\r\n\r\n").next();
+                        if (!data.startsWith(" " + wsPath)) {
+                            throw new SecurityException("ws path does not match");
+                        }
+                        Matcher match = Pattern.compile("Sec-WebSocket-Key: (.*)").matcher(data);
+                        Matcher protocolMatcher = Pattern.compile("Sec-WebSocket-Protocol: binary").matcher(data);
+                        if (!protocolMatcher.find()) {
+                            throw new IllegalStateException("http header Sec-WebSocket-Protocol: binary not found");
+                        }
+                        if (match.find()) {
+                            byte[] response = ("HTTP/1.1 101 Switching Protocols\r\n"
+                                    + "Connection: Upgrade\r\n"
+                                    + "Upgrade: websocket\r\n"
+                                    + "Sec-WebSocket-Accept: "
+                                    + Base64.getEncoder().encodeToString(CryptoUtils.SHA1((match.group(1) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+                                    .getBytes("UTF-8"))) + "\r\n"
+                                    + "Sec-WebSocket-Protocol: binary\r\n\r\n").getBytes("UTF-8");
+                            outputStream.write(response, 0, response.length);
+                            WebSocketProtocol webSocketProtocol = new WebSocketProtocol();
+                            webSocketProtocol.isClient = false;
+                            protocol = webSocketProtocol;
+                            byte[] bytes = protocol.readTag(inputStream);
+                        } else {
+                            throw new IllegalStateException("http header Sec-WebSocket-Key not found");
+                        }
+                    } else {
+                        protocol = new FullProtocol();
+                        TLInputStream tlInputStream = new TLInputStream(((FullProtocol) protocol).readMsg(inputStream, tag));
+                        long authKeyId = tlInputStream.readLong();
+                        tlInputStream.position(0);
+                        MTMessage mtMessage = new MTMessage();
+                        mtMessage.setClient(false);
+                        if (authKeyId != 0) {
+                            if (serverManager != null) {
+                                authKey = serverManager.getAuthKey(authKeyId);
+                                if (authKey != null) {
+                                    mtProtoVersion = MTMessage.checkVersion(authKey, tlInputStream.readAllBytes());
+                                    mtMessage.setAuthKey(authKey);
+                                }
+                            }
+                        }
+                        tlInputStream.position(0);
+                        mtMessage.setMTProtoVersion(mtProtoVersion);
+                        mtMessage.read(tlInputStream);
+                        onMTMessage(mtMessage);
+                    }
                 }
 
                 if (protocol == null) {
                     throw new IllegalStateException("Tag does not match");
-                }
-
-                session.setUniqueId(CryptoUtils.randomLong());
-
-                if (protocol instanceof FullProtocol fullProtocol) {
-                    TLInputStream tlInputStream = new TLInputStream(fullProtocol.readMsg(inputStream, (byte) a));
-                    long authKeyId = tlInputStream.readLong();
-                    tlInputStream.position(0);
-                    MTMessage mtMessage = new MTMessage();
-                    mtMessage.setClient(false);
-                    if (authKeyId != 0) {
-                        if (serverManager != null) {
-                            authKey = serverManager.getAuthKey(authKeyId);
-                            if (authKey != null) {
-                                mtProtoVersion = MTMessage.checkVersion(authKey, tlInputStream.readAllBytes());
-                                mtMessage.setAuthKey(authKey);
-                            }
-                        }
-                    }
-                    tlInputStream.position(0);
-                    mtMessage.setMTProtoVersion(mtProtoVersion);
-                    mtMessage.read(tlInputStream);
-                    onMTMessage(mtMessage);
                 }
 
                 isReading = true;
@@ -194,34 +226,38 @@ public class MTClient {
             closeScheduledFuture = scheduledExecutorService.schedule(this::close, CLOSE_DELAY_SEC, TimeUnit.SECONDS);
             if (message.getAuthKeyId() != 0) {
                 if (session.getSessionId() == 0) {
+                    if (message.getSessionId() == 0) {
+                        TLOutputStream tlOutputStream = new TLOutputStream();
+                        tlOutputStream.writeInt(-404);
+                        protocol.writeMsg(outputStream, tlOutputStream.toByteArray());
+                        close();
+                        return;
+                    }
                     List<MTProtoScheme.FutureSalt2> salts = new ArrayList<>();
+                    boolean isNewSession = false;
                     if (serverManager != null) {
-                        session = serverManager.getSession(message.getAuthKeyId(), message.getSessionId());
+                        MTSession oldSession = serverManager.getSession(message.getAuthKeyId(), message.getSessionId());
+                        if (oldSession != null) {
+                            session = oldSession;
+                        } else {
+                            isNewSession = true;
+                            session.setFirstMessageId(message.getMessageId());
+                        }
                         serverManager.deleteExpiredSalts(message.getAuthKeyId());
                         salts = serverManager.getSalts(message.getAuthKeyId(), 5);
-                    }
-                    boolean isNewSession = false;
-                    if (session == null) {
+                    } else {
                         isNewSession = true;
-                        session = new MTSession();
-                        session.setUniqueId(CryptoUtils.randomLong());
-                        session.setSessionId(message.getSessionId());
                         session.setFirstMessageId(message.getMessageId());
-                        session.setClient(false);
                     }
+
                     if (salts.size() == 0) {
-                        salts = createNewSalts(session.getServerTime()/1000, 5);
-                        if (serverManager != null){
+                        salts = createNewSalts(session.getServerTime() / 1000, 5);
+                        if (serverManager != null) {
                             serverManager.setSalts(message.getAuthKeyId(), salts);
                         }
                     }
                     session.futureSalts = salts;
-                    if (session.getFirstMessageId() == 0) {
-                        session.setFirstMessageId(message.getMessageId());
-                    }
-                    if (session.getSessionId() == 0) {
-                        session.setSessionId(message.getSessionId());
-                    }
+                    session.setSessionId(message.getSessionId());
                     if (serverManager != null) {
                         serverManager.setSession(message.getAuthKeyId(), session);
                     }
@@ -624,16 +660,36 @@ public class MTClient {
         ).findFirst().orElseThrow();
 
         byte[] decryptedData = rsaKey.decrypt(reqDHParams.encryptedData);
-
-        TLInputStream byteArrayInputStream = new TLInputStream(decryptedData);
-        byteArrayInputStream.read();
-        byte[] hash = byteArrayInputStream.readBytes(20);
-        pqInnerData = MTProtoScheme.PQInnerData.readObject(byteArrayInputStream);
-        TLOutputStream byteArrayOutputStream = new TLOutputStream();
-        pqInnerData.write(byteArrayOutputStream);
-        byte[] myPqHash = CryptoUtils.SHA1(byteArrayOutputStream.toByteArray());
-        if (!Arrays.equals(hash, myPqHash)) {
-            throw new SecurityException("PQInnerDataDc hash does not matched");
+        TLInputStream decryptedDataStream = new TLInputStream(decryptedData);
+        decryptedDataStream.read();
+        byte[] hash = decryptedDataStream.readBytes(20);
+        pqInnerData = MTProtoScheme.PQInnerData.readObject(decryptedDataStream);
+        if (pqInnerData == null) {
+            decryptedDataStream.position(0);
+            byte[] tempKeyXor = decryptedDataStream.readBytes(32);
+            byte[] aesEncrypted = decryptedDataStream.readBytes(256 - 32);
+            byte[] tempKey = CryptoUtils.xor(tempKeyXor, CryptoUtils.SHA256(aesEncrypted));
+            byte[] iv = new byte[32];
+            byte[] dataWithHash = CryptoUtils.AES256IGEDecrypt(aesEncrypted, iv, tempKey);
+            TLInputStream dataWithHashStream = new TLInputStream(dataWithHash);
+            byte[] dataWithPad = CryptoUtils.reverse(dataWithHashStream.readBytes(dataWithHash.length - 32));
+            byte[] sha2TempKeyDataWithPad = dataWithHashStream.readBytes(32);
+            if (!Arrays.equals(sha2TempKeyDataWithPad, CryptoUtils.SHA256(
+                    CryptoUtils.concat(tempKey, dataWithPad)))) {
+                throw new SecurityException("sha2TempKeyDataWithPad hash does not matched");
+            }
+            if (dataWithPad.length == 192) {
+                pqInnerData = MTProtoScheme.PQInnerData.readObject(new TLInputStream(dataWithPad));
+            } else {
+                throw new SecurityException("dataWithPad length isn't 192");
+            }
+        } else {
+            TLOutputStream byteArrayOutputStream = new TLOutputStream();
+            pqInnerData.write(byteArrayOutputStream);
+            byte[] myPqHash = CryptoUtils.SHA1(byteArrayOutputStream.toByteArray());
+            if (!Arrays.equals(hash, myPqHash)) {
+                throw new SecurityException("PQInnerDataDc hash does not matched");
+            }
         }
 
         byte[] p;
@@ -809,7 +865,6 @@ public class MTClient {
 
         byte[] authAuxHash = CryptoUtils.substring(CryptoUtils.SHA1(authKey.getAuthKey()), 0, 8); // Step8
         byte[] newNonceHash = CryptoUtils.substring(CryptoUtils.SHA1(newNonce, new byte[]{1}, authAuxHash), 4, 16);
-
         if (serverManager != null && serverManager.isAuthKeyExists(authKey.getAuthKeyId())) {
             MTProtoScheme.DhGenRetry dhGenRetry = new MTProtoScheme.DhGenRetry();
             dhGenRetry.nonce = nonce;
@@ -1125,7 +1180,6 @@ public class MTClient {
                     TLOutputStream tlOutputStream = new TLOutputStream();
                     tlOutputStream.writeInt(-404);
                     protocol.writeMsg(outputStream, tlOutputStream.toByteArray());
-                    tlOutputStream.close();
                     throw new IOException();
                 }
 

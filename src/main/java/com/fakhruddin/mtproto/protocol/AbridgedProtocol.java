@@ -7,12 +7,11 @@ import java.io.OutputStream;
  * Created by Fakhruddin Fahim on 22/07/2022
  */
 public class AbridgedProtocol extends Protocol {
-    private static final String TAG = "AbridgedProtocol";
-    public static final byte[] TAG_BYTES = new byte[]{(byte) 0xef};
+    public static final byte[] TAG = new byte[]{(byte) 0xef};
 
     @Override
     public byte[] getTag() {
-        return TAG_BYTES;
+        return TAG;
     }
 
     @Override

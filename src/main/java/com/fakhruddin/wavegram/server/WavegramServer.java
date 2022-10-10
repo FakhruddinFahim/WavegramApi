@@ -75,6 +75,10 @@ public class WavegramServer {
                     wavegramClientMap.put(client.getSession().getUniqueId(), wavegramClient);
                     wavegramClients.put(client.getAuthKey() != null ? client.getAuthKey().getAuthKeyId() : 0, wavegramClientMap);
                 } else {
+                    Map<Long, WavegramClient> unauthClients = wavegramClients.get(0L);
+                    if (unauthClients != null){
+                        unauthClients.remove(client.getSession().getUniqueId());
+                    }
                     wavegramClientMap.put(client.getSession().getUniqueId(), wavegramClient);
                 }
             }

@@ -1,6 +1,6 @@
 package com.fakhruddin.wavegram;
 
-import com.fakhruddin.mtproto.protocol.IntermediateProtocol;
+import com.fakhruddin.mtproto.protocol.AbridgedProtocol;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.core.TLObject;
 import com.fakhruddin.wavegram.client.*;
@@ -27,7 +27,7 @@ public class ClientMain {
         wavegramClient.setWavegramManager(new JsonWavegramManager());
         wavegramClient.setDownloadManager(new JsonDownloadManager());
         wavegramClient.setUploadManager(new JsonUploadManager());
-        wavegramClient.setProtocol(new IntermediateProtocol());
+        wavegramClient.setProtocol(new AbridgedProtocol());
 //        wavegramClient.setProxy("127.0.0.1",9150, TcpSocket.ProxyType.SOCKS5H);
         wavegramClient.onMessage(object -> {
             //All responses from server

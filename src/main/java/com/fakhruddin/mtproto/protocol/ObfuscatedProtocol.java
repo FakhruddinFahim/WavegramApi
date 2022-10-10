@@ -1,5 +1,6 @@
 package com.fakhruddin.mtproto.protocol;
 
+import com.fakhruddin.mtproto.AesCTR;
 import com.fakhruddin.mtproto.tl.core.TLInputStream;
 import com.fakhruddin.mtproto.tl.core.TLOutputStream;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
@@ -8,32 +9,78 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 
 /**
  * Created by Fakhruddin Fahim on 17/09/2022
  */
 public class ObfuscatedProtocol extends Protocol {
 
-    private Protocol protocol = null;
+    private Protocol protocol = new AbridgedProtocol();
+    private AesCTR encryptor;
+    private AesCTR decryptor;
 
     public ObfuscatedProtocol(Protocol protocol) {
+        if (protocol instanceof ObfuscatedProtocol){
+            throw new IllegalArgumentException();
+        }
+        this.protocol = protocol;
+    }
+
+    public ObfuscatedProtocol() {
+
+    }
+
+    public void setProtocol(Protocol protocol) {
+        if (protocol instanceof ObfuscatedProtocol){
+            throw new IllegalArgumentException();
+        }
         this.protocol = protocol;
     }
 
     @Override
     public byte[] getTag() {
+        if (protocol.getTag().length < 4) {
+            byte[] tag = new byte[4];
+            Arrays.fill(tag, protocol.getTag()[0]);
+            return tag;
+        }
         return protocol.getTag();
     }
 
     @Override
     public byte[] readTag(InputStream inputStream) throws IOException {
-        return readBytes(protocol.getTag().length, inputStream);
-    }
+        byte[] bytes = readBytes(64, inputStream);
+        TLInputStream obfuscated = new TLInputStream(bytes);
+        obfuscated.skip(8);
 
-    byte[] encryptKey;
-    byte[] encryptIv;
-    byte[] decryptKey;
-    byte[] decryptIv;
+        TLOutputStream reverseOutput = new TLOutputStream();
+        for (int i = 0; i < bytes.length; i++) {
+            reverseOutput.write(bytes[bytes.length - 1 - i]);
+        }
+        TLInputStream reverseInput = new TLInputStream(reverseOutput.toByteArray());
+        reverseInput.skip(8);
+
+        decryptor = new AesCTR(obfuscated.readBytes(32), obfuscated.readBytes(16));
+        encryptor = new AesCTR(reverseInput.readBytes(32), reverseInput.readBytes(16));
+
+        byte[] decryptedData = decryptor.encrypt(bytes);
+        TLInputStream tlInputStream = new TLInputStream(decryptedData);
+        tlInputStream.skip(56);
+        byte[] tag = tlInputStream.readBytes(4);
+
+        protocol = null;
+        if (tag[0] == AbridgedProtocol.TAG[0]) {
+            protocol = new AbridgedProtocol();
+        } else if (Arrays.equals(tag, IntermediateProtocol.TAG)) {
+            protocol = new IntermediateProtocol();
+        } else if (Arrays.equals(tag, PaddedIntermediateProtocol.TAG)) {
+            protocol = new PaddedIntermediateProtocol();
+        } else {
+            throw new IllegalStateException("Cannot detect protocol");
+        }
+        return bytes;
+    }
 
     @Override
     public void writeTag(OutputStream outputStream) throws IOException {
@@ -41,7 +88,7 @@ public class ObfuscatedProtocol extends Protocol {
         while (true) {
             TLOutputStream o = new TLOutputStream();
             o.write(CryptoUtils.randomBytes(56));
-            o.write(this.protocol.getTag());
+            o.write(getTag());
             o.write(CryptoUtils.randomBytes(4));
 
             inputStream = new TLInputStream(o.toByteArray());
@@ -57,7 +104,7 @@ public class ObfuscatedProtocol extends Protocol {
                     firstInt == 0xeeeeeeee) {
                 continue;
             }
-            if (inputStream.readInt() == 0){
+            if (inputStream.readInt() == 0) {
                 continue;
             }
             break;
@@ -73,18 +120,14 @@ public class ObfuscatedProtocol extends Protocol {
         TLInputStream reverseInput = new TLInputStream(reverseOutput.toByteArray());
 
         inputStream.position(8);
-        encryptKey = inputStream.readBytes(32);
-        encryptIv = inputStream.readBytes(16);
-
         reverseInput.position(8);
-        decryptKey = reverseInput.readBytes(32);
-        decryptIv = reverseInput.readBytes(16);
+        encryptor = new AesCTR(inputStream.readBytes(32), inputStream.readBytes(16));
+        decryptor = new AesCTR(reverseInput.readBytes(32), reverseInput.readBytes(16));
         reverseInput.position(0);
-
         inputStream.position(0);
 
         TLInputStream encryptedRandom = new TLInputStream(
-                CryptoUtils.AES256CTREncrypt(inputStream.readAllBytes(), encryptKey, encryptIv));
+                encryptor.encrypt(inputStream.readAllBytes()));
 
         inputStream.position(0);
 
@@ -99,7 +142,7 @@ public class ObfuscatedProtocol extends Protocol {
 
     @Override
     public byte[] readMsg(InputStream inputStream) throws IOException {
-        byte[] bytes = CryptoUtils.AES256CTRDecrypt(inputStream.readAllBytes(), decryptKey, decryptIv);
+        byte[] bytes = decryptor.encrypt(inputStream.readAllBytes());
         return this.protocol.readMsg(new ByteArrayInputStream(bytes));
     }
 
@@ -107,6 +150,6 @@ public class ObfuscatedProtocol extends Protocol {
     public void writeMsg(OutputStream outputStream, byte[] buffer) throws IOException {
         TLOutputStream tlOutputStream = new TLOutputStream();
         this.protocol.writeMsg(tlOutputStream, buffer);
-        outputStream.write(CryptoUtils.AES256CTREncrypt(tlOutputStream.toByteArray(), encryptKey, encryptIv));
+        outputStream.write(encryptor.encrypt(tlOutputStream.toByteArray()));
     }
 }

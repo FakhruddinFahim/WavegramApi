@@ -40,8 +40,15 @@ public final class CryptoUtils {
         return secureRandom.nextLong();
     }
 
+    public static byte[] reverse(byte[] buffer) {
+        byte[] reverse = new byte[buffer.length];
+        for (int i = 0; i < buffer.length; i++) {
+            reverse[i] = buffer[(buffer.length - 1) - i];
+        }
+        return reverse;
+    }
 
-    public static byte[] AES256CTRDecrypt(byte[] src, byte[] aesKey, byte[] aesIv){
+    public static byte[] AES256CTRDecrypt(byte[] src, byte[] aesKey, byte[] aesIv) {
         try {
             Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
             SecretKeySpec key = new SecretKeySpec(aesKey, "AES");
@@ -55,7 +62,7 @@ public final class CryptoUtils {
         return null;
     }
 
-    public static byte[] AES256CTREncrypt(byte[] src, byte[] aesKey, byte[] aesIv){
+    public static byte[] AES256CTREncrypt(byte[] src, byte[] aesKey, byte[] aesIv) {
         try {
             Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
             SecretKeySpec key = new SecretKeySpec(aesKey, "AES");
@@ -64,6 +71,32 @@ public final class CryptoUtils {
             return cipher.doFinal(src);
         } catch (NoSuchAlgorithmException | InvalidKeyException | BadPaddingException |
                  InvalidAlgorithmParameterException | IllegalBlockSizeException | NoSuchPaddingException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    public static byte[] AES256ECBEncrypt(byte[] src, byte[] aesKey) {
+        try {
+            Cipher cipher = Cipher.getInstance("AES/ECB/NoPadding");
+            SecretKeySpec key = new SecretKeySpec(aesKey, "AES");
+            cipher.init(Cipher.ENCRYPT_MODE, key);
+            return cipher.doFinal(src);
+        } catch (NoSuchAlgorithmException | InvalidKeyException | BadPaddingException |
+                 IllegalBlockSizeException | NoSuchPaddingException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    public static byte[] AES256ECBDecrypt(byte[] src, byte[] aesKey) {
+        try {
+            Cipher cipher = Cipher.getInstance("AES/ECB/NoPadding");
+            SecretKeySpec key = new SecretKeySpec(aesKey, "AES");
+            cipher.init(Cipher.DECRYPT_MODE, key);
+            return cipher.doFinal(src);
+        } catch (NoSuchAlgorithmException | InvalidKeyException | BadPaddingException |
+                 IllegalBlockSizeException | NoSuchPaddingException e) {
             e.printStackTrace();
         }
         return null;

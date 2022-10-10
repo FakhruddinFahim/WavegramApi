@@ -25,7 +25,6 @@ import java.util.concurrent.*;
 public class WavegramClient {
     private static final String TAG = "WavegramClient";
     private CountDownLatch initCountDownLatch;
-    private Phaser phaser = new Phaser(1);
     MTProtoClient protoClient;
     private OnMessage onMessage;
     public int apiId;
@@ -94,7 +93,7 @@ public class WavegramClient {
         initConnection.langCode = langCode;
         initConnection.proxy = null;
         initConnection.params = null;
-        initConnection.query = new ApiScheme.NsHelp.GetNearestDc();
+        initConnection.query = new ApiScheme.NsHelp.GetConfig();
         ApiScheme.InvokeWithLayer invokeWithLayer = new ApiScheme.InvokeWithLayer();
         invokeWithLayer.layer = ApiScheme.LAYER_NUM;
         invokeWithLayer.query = initConnection;
