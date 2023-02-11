@@ -4,7 +4,6 @@ import com.fakhruddin.mtproto.MTMessage;
 import com.fakhruddin.mtproto.server.MTClient;
 import com.fakhruddin.mtproto.server.MTProtoServer;
 import com.fakhruddin.mtproto.server.ProtoCallback;
-import com.fakhruddin.mtproto.server.ServerManager;
 import com.fakhruddin.mtproto.tl.core.TLContext;
 import com.fakhruddin.mtproto.tl.core.TLInputStream;
 import com.fakhruddin.mtproto.tl.core.TLObject;
@@ -19,13 +18,12 @@ import java.util.Map;
 /**
  * Created by Fakhruddin Fahim on 22/07/2022
  */
-public class WavegramServer {
+public class WavegramServer extends MTProtoServer{
     private static final String TAG = "WavegramServer";
-    private final MTProtoServer protoServer;
-
     private final Map<Long, Map<Long, WavegramClient>> wavegramClients = new HashMap<>();
 
     private MessageHandler messageHandler;
+    private ProtoCallback protoCallback;
 
     public static class WavegramClient {
         public long sessionId = 0;
@@ -37,17 +35,9 @@ public class WavegramServer {
     }
 
     public WavegramServer(int port) {
+        super(port);
         TLContext.context = new ApiContext();
-        protoServer = new MTProtoServer(port);
-        protoServer.setRsaPrivateKeys(Config.RSA_PRIVATE_KEYS);
-    }
-
-    public Map<Long, Map<Long, MTClient>> getProtoClients() {
-        return protoServer.getClients();
-    }
-
-    public MTProtoServer getProtoServer() {
-        return protoServer;
+        rsaPrivateKeys = Config.RSA_PRIVATE_KEYS;
     }
 
     public Map<Long, Map<Long, WavegramClient>> getWavegramClients() {
@@ -58,9 +48,13 @@ public class WavegramServer {
         this.messageHandler = messageHandler;
     }
 
+    @Override
+    public void setProtoCallback(ProtoCallback protoCallback) {
+        this.protoCallback = protoCallback;
+    }
 
     public void start() {
-        protoServer.setProtoCallback(new ProtoCallback() {
+        setProtoCallback(new ProtoCallback() {
             @Override
             public void onSessionStart(MTClient client, boolean isNewSession) {
                 System.out.println(TAG + ".onSessionStart: called " + isNewSession);
@@ -141,11 +135,7 @@ public class WavegramServer {
                 }
             }
         });
-        protoServer.start();
-    }
-
-    public void setServerManager(ServerManager serverManager) {
-        protoServer.setServerManager(serverManager);
+        super.start();
     }
 
     public TLObject getServerConfig() {
@@ -158,7 +148,7 @@ public class WavegramServer {
         ApiScheme.DcOption2 dcOption2 = new ApiScheme.DcOption2();
         dcOption2.id = 1;
         dcOption2.ipAddress = "127.0.0.1";
-        dcOption2.port = protoServer.getPort();
+        dcOption2.port = getPort();
         config2.dcOptions.add(dcOption2);
         config2.dcTxtDomainName = "i.dont.know";
         config2.chatSizeMax = 200;
@@ -195,7 +185,8 @@ public class WavegramServer {
         return config2;
     }
 
+    @Override
     public void close() {
-        protoServer.close();
+        super.close();
     }
 }

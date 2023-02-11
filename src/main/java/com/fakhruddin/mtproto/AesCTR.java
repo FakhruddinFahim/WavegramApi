@@ -1,55 +1,42 @@
 package com.fakhruddin.mtproto;
 
-import com.fakhruddin.mtproto.utils.CryptoUtils;
-
-import java.util.Arrays;
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.ShortBufferException;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * Created by Fakhruddin Fahim on 08/10/2022
  */
 public class AesCTR {
-    private byte[] key;
-    private byte[] iv;
-    private Counter counter;
-    private byte[] remainingCounter = null;
-    private int remainingCounterIndex;
-
-    public AesCTR(byte[] key, byte[] iv) {
+    private final byte[] key;
+    private final byte[] iv;
+    private final Cipher cipher;
+    public AesCTR(byte[] key, byte[] iv) throws NoSuchPaddingException, NoSuchAlgorithmException,
+            InvalidAlgorithmParameterException, InvalidKeyException {
         this.key = key;
         this.iv = iv;
-        counter = new Counter(iv);
-        remainingCounterIndex = 16;
+        cipher = Cipher.getInstance("AES/CTR/NoPadding");
+        SecretKeySpec decryptKey = new SecretKeySpec(key, "AES");
+        IvParameterSpec decryptIv = new IvParameterSpec(iv);
+        cipher.init(Cipher.ENCRYPT_MODE, decryptKey, decryptIv);
     }
 
-    public byte[] encrypt(byte[] buffer) {
-        byte[] encrypted = Arrays.copyOf(buffer, buffer.length);
-        for (int i = 0; i < buffer.length; i++) {
-            if (this.remainingCounterIndex == 16) {
-                this.remainingCounter = CryptoUtils.AES256ECBEncrypt(this.counter.counter, key);
-                this.remainingCounterIndex = 0;
-                this.counter.increment();
-            }
-            encrypted[i] ^= this.remainingCounter[this.remainingCounterIndex++];
-        }
-        return encrypted;
+    public byte[] getIv() {
+        return iv;
     }
 
-    private static class Counter {
-        public byte[] counter;
+    public byte[] getKey() {
+        return key;
+    }
 
-        public Counter(byte[] iv) {
-            this.counter = iv;
-        }
-
-        public void increment() {
-            for (int i = 15; i >= 0; i--) {
-                if ((this.counter[i] & 0xFF) == 255) {
-                    this.counter[i] = 0;
-                } else {
-                    this.counter[i]++;
-                    break;
-                }
-            }
-        }
+    public byte[] encrypt(byte[] buffer) throws ShortBufferException {
+        byte[] out = new byte[buffer.length];
+        cipher.update(buffer, 0, buffer.length, out);
+        return out;
     }
 }

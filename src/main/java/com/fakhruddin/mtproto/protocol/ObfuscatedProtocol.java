@@ -5,17 +5,21 @@ import com.fakhruddin.mtproto.tl.core.TLInputStream;
 import com.fakhruddin.mtproto.tl.core.TLOutputStream;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
 
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.ShortBufferException;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 
 /**
  * Created by Fakhruddin Fahim on 17/09/2022
  */
 public class ObfuscatedProtocol extends Protocol {
-
     private Protocol protocol = new AbridgedProtocol();
     private AesCTR encryptor;
     private AesCTR decryptor;
@@ -61,25 +65,38 @@ public class ObfuscatedProtocol extends Protocol {
         TLInputStream reverseInput = new TLInputStream(reverseOutput.toByteArray());
         reverseInput.skip(8);
 
-        decryptor = new AesCTR(obfuscated.readBytes(32), obfuscated.readBytes(16));
-        encryptor = new AesCTR(reverseInput.readBytes(32), reverseInput.readBytes(16));
+        try {
 
-        byte[] decryptedData = decryptor.encrypt(bytes);
-        TLInputStream tlInputStream = new TLInputStream(decryptedData);
-        tlInputStream.skip(56);
-        byte[] tag = tlInputStream.readBytes(4);
+            decryptor = new AesCTR(obfuscated.readBytes(32), obfuscated.readBytes(16));
+            encryptor = new AesCTR(reverseInput.readBytes(32), reverseInput.readBytes(16));
 
-        protocol = null;
-        if (tag[0] == AbridgedProtocol.TAG[0]) {
-            protocol = new AbridgedProtocol();
-        } else if (Arrays.equals(tag, IntermediateProtocol.TAG)) {
-            protocol = new IntermediateProtocol();
-        } else if (Arrays.equals(tag, PaddedIntermediateProtocol.TAG)) {
-            protocol = new PaddedIntermediateProtocol();
-        } else {
-            throw new IllegalStateException("Cannot detect protocol");
+            byte[] decryptedData = decryptor.encrypt(bytes);
+            TLInputStream tlInputStream = new TLInputStream(decryptedData);
+            tlInputStream.skip(56);
+            byte[] tag = tlInputStream.readBytes(4);
+
+            protocol = null;
+            if (tag[0] == AbridgedProtocol.TAG[0]) {
+                protocol = new AbridgedProtocol();
+            } else if (Arrays.equals(tag, IntermediateProtocol.TAG)) {
+                protocol = new IntermediateProtocol();
+            } else if (Arrays.equals(tag, PaddedIntermediateProtocol.TAG)) {
+                protocol = new PaddedIntermediateProtocol();
+            } else {
+                throw new IllegalStateException("Cannot detect protocol");
+            }
+            return bytes;
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        } catch (NoSuchPaddingException e) {
+            throw new RuntimeException(e);
+        } catch (InvalidAlgorithmParameterException e) {
+            throw new RuntimeException(e);
+        } catch (InvalidKeyException e) {
+            throw new RuntimeException(e);
+        } catch (ShortBufferException e) {
+            throw new RuntimeException(e);
         }
-        return bytes;
     }
 
     @Override
@@ -121,35 +138,55 @@ public class ObfuscatedProtocol extends Protocol {
 
         inputStream.position(8);
         reverseInput.position(8);
-        encryptor = new AesCTR(inputStream.readBytes(32), inputStream.readBytes(16));
-        decryptor = new AesCTR(reverseInput.readBytes(32), reverseInput.readBytes(16));
-        reverseInput.position(0);
-        inputStream.position(0);
+        try {
+            encryptor = new AesCTR(inputStream.readBytes(32), inputStream.readBytes(16));
+            decryptor = new AesCTR(reverseInput.readBytes(32), reverseInput.readBytes(16));
+            reverseInput.position(0);
+            inputStream.position(0);
 
-        TLInputStream encryptedRandom = new TLInputStream(
-                encryptor.encrypt(inputStream.readAllBytes()));
+            TLInputStream encryptedRandom = new TLInputStream(
+                    encryptor.encrypt(inputStream.readAllBytes()));
 
-        inputStream.position(0);
+            inputStream.position(0);
 
-        TLOutputStream randomOutput = new TLOutputStream();
-        randomOutput.write(inputStream.readBytes(56));
+            TLOutputStream randomOutput = new TLOutputStream();
+            randomOutput.write(inputStream.readBytes(56));
 
-        encryptedRandom.position(56);
-        randomOutput.write(encryptedRandom.readBytes(8));
+            encryptedRandom.position(56);
+            randomOutput.write(encryptedRandom.readBytes(8));
 
-        outputStream.write(randomOutput.toByteArray());
+            outputStream.write(randomOutput.toByteArray());
+        } catch (NoSuchPaddingException e) {
+            throw new RuntimeException(e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        } catch (InvalidAlgorithmParameterException e) {
+            throw new RuntimeException(e);
+        } catch (InvalidKeyException e) {
+            throw new RuntimeException(e);
+        } catch (ShortBufferException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     public byte[] readMsg(InputStream inputStream) throws IOException {
-        byte[] bytes = decryptor.encrypt(inputStream.readAllBytes());
-        return this.protocol.readMsg(new ByteArrayInputStream(bytes));
+        try {
+            byte[] bytes = decryptor.encrypt(inputStream.readAllBytes());
+            return this.protocol.readMsg(new ByteArrayInputStream(bytes));
+        } catch (ShortBufferException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     public void writeMsg(OutputStream outputStream, byte[] buffer) throws IOException {
         TLOutputStream tlOutputStream = new TLOutputStream();
         this.protocol.writeMsg(tlOutputStream, buffer);
-        outputStream.write(encryptor.encrypt(tlOutputStream.toByteArray()));
+        try {
+            outputStream.write(encryptor.encrypt(tlOutputStream.toByteArray()));
+        } catch (ShortBufferException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

@@ -9,7 +9,7 @@ public class ServerMain {
 
     public static void main(String[] args) {
         WavegramServer wavegramServer = new WavegramServer(Config.SERVER_PORT);
-        wavegramServer.getProtoServer().thisDc = Config.SERVER_DC_ID;
+        wavegramServer.thisDc = Config.SERVER_DC_ID;
         wavegramServer.setServerManager(new MySqlServerManager());
         wavegramServer.setMessageHandler(new WavegramMessageHandler());
         wavegramServer.start();

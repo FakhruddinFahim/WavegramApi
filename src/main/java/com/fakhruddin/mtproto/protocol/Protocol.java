@@ -18,7 +18,7 @@ public abstract class Protocol {
 
     public abstract void writeMsg(OutputStream outputStream, byte[] buffer) throws IOException;
 
-    public static synchronized byte[] readBytes(int count, InputStream inputStream) throws IOException {
+    public static byte[] readBytes(int count, InputStream inputStream) throws IOException {
         byte[] buf = inputStream.readNBytes(count);
         if (buf.length < count){
             throw new IOException(count + " bytes requested, " + buf.length + " bytes read");

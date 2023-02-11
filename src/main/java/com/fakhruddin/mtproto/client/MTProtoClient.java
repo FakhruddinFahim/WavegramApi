@@ -29,7 +29,7 @@ public class MTProtoClient extends TcpSocket {
     private MTProtoScheme.ServerDHInnerData2 serverDHInnerData;
     private byte[] tmpAesKey;
     private byte[] tmpAesIv;
-    private int authRetryId = -1;
+    private long authRetryId = -1;
     private byte[] calculatedAuthKey;
     private RsaKey selectedPublicRsaKey;
     private static final int AUTH_RETRY_LIMIT = 5;
@@ -40,13 +40,11 @@ public class MTProtoClient extends TcpSocket {
     private ScheduledFuture<?> tempAuthScheduleFuture;
     public static final int SENT_MSG_CACHE_LIMIT = 100;
     public static final int RECV_MSG_CACHE_LIMIT = 100;
-    public static final int RPC_RESPONSE_TIMEOUT = 1000 * 20;
-    private final Map<Long, MTMessage> sentMessages = new LinkedHashMap<>();
-    private final Map<Long, MTMessage> recvMessages = new LinkedHashMap<>();
-    private final Map<Long, OnMessage> rpcCallbacks = new HashMap<>();
-    private final Map<Long, ScheduledFuture<?>> rpcScheduledFutures = new HashMap<>();
-    private final Map<Long, FutureResult> futureResults = new HashMap<>();
-    private final Map<Class<? extends TLObject>, OnMessage> messageCallbacks = new HashMap<>();
+    public static final long RPC_RESPONSE_TIMEOUT = 1000 * 20;
+    protected final Map<Long, MTMessage> sentMessages = new LinkedHashMap<>();
+    protected final Map<Long, MTMessage> recvMessages = new LinkedHashMap<>();
+    protected final Map<Long, RpcCallback> rpcCallbacks = new HashMap<>();
+    protected final Map<Class<? extends TLObject>, OnMessage> messageCallbacks = new HashMap<>();
     private ProtoCallback protoCallback;
     private AuthKey authKey;
     private MTSession session = new MTSession();
@@ -66,10 +64,24 @@ public class MTProtoClient extends TcpSocket {
     /**
      * Acknowledged message IDs
      */
-    private final List<Long> ackedMsgs = new LinkedList<>();
+    protected final List<Long> ackedMsgs = new LinkedList<>();
     private List<ApiScheme.DcOption2> dcOptionList = new ArrayList<>();
     private int dcId = -1;
     private boolean useIpv6 = false;
+
+    private static class RpcCallback {
+        public long msgId = 0;
+        public OnMessage callback = null;
+        public ScheduledFuture<?> scheduledFuture;
+
+        public CompletableFuture<TLObject> future = new CompletableFuture<>();
+
+        public void cancelTimeout() {
+            if (scheduledFuture != null) {
+                scheduledFuture.cancel(true);
+            }
+        }
+    }
 
     public MTProtoClient(List<ApiScheme.DcOption2> dcOptionList) {
         setTimeout(0);
@@ -194,14 +206,10 @@ public class MTProtoClient extends TcpSocket {
 
     public void switchDc(int dcId) {
         close();
-        if (clientManager != null) {
-            clientManager.setDcId(dcId);
-        }
         this.dcId = dcId;
         start();
     }
 
-    @Override
     public void start() {
         if (clientManager != null && dcId == -1) {
             this.dcId = clientManager.getDcId();
@@ -237,52 +245,25 @@ public class MTProtoClient extends TcpSocket {
         }
         scheduleExecutorService = Executors.newSingleThreadScheduledExecutor();
         executorService = Executors.newCachedThreadPool();
-        executorService.execute(super::run);
-    }
-
-    @Override
-    public void run() {
-        if (clientManager != null && dcId == -1) {
-            this.dcId = clientManager.getDcId();
-        }
-        Stream<ApiScheme.DcOption2> dcOptionStream = dcOptionList.stream().filter((dc) -> {
-            if (dc.id == dcId) {
-                if (useIpv6) {
-                    return dc.ipv6 != null;
-                } else return dc.ipv6 == null;
+        executorService.execute(() -> {
+            try {
+                if (!connect()) {
+                    reconnect();
+                    return;
+                }
+                onStart();
+            } catch (Exception e) {
+                e.printStackTrace();
+                reconnect();
             }
-            return false;
         });
-        ApiScheme.DcOption2 dcOption = dcOptionStream.findFirst().orElse(null);
-        if (dcOption == null) {
-            dcOption = dcOptionList.stream().filter((dc) -> dc.id == dcId && dc.ipv6 == null).findFirst().orElse(null);
-            if (dcOption == null) {
-                dcId = 1;
-                dcOption = dcOptionList.stream().filter((dc) -> dc.id == dcId && dc.ipv6 == null).findFirst().orElse(dcOptionList.get(0));
-            }
-        }
-        if (clientManager != null) {
-            clientManager.setDcId(dcId);
-        }
-
-        setHost(dcOption.ipAddress);
-        setPort(dcOption.port);
-        if (executorService != null) {
-            executorService.shutdownNow();
-        }
-        if (scheduleExecutorService != null) {
-            scheduleExecutorService.shutdownNow();
-        }
-        scheduleExecutorService = Executors.newSingleThreadScheduledExecutor();
-        executorService = Executors.newCachedThreadPool();
-        super.run();
     }
 
-    @Override
-    protected void onStart() {
+    private void onStart() {
         isClosed = false;
         createTempAuthKey = false;
         authRetryId = -1;
+        reconnectAttemptCount = 0;
         try {
             if (protocol instanceof WebSocketProtocol) {
                 ((WebSocketProtocol) protocol).isClient = true;
@@ -339,14 +320,14 @@ public class MTProtoClient extends TcpSocket {
                         tempAuthScheduleFuture = scheduleExecutorService.schedule(this::createTempAuthKey,
                                 (tempAuthKey.getExpireDate() - (session.getServerTime() / 1000)) - 60, TimeUnit.SECONDS);
                         if (protoCallback != null) {
-                            protoCallback.onStart();
+                            executorService.execute(() -> protoCallback.onStart());
                         }
                     } else {
                         createTempAuthKey();
                     }
                 } else {
                     if (protoCallback != null) {
-                        protoCallback.onStart();
+                        executorService.execute(() -> protoCallback.onStart());
                     }
                 }
             } else {
@@ -354,7 +335,6 @@ public class MTProtoClient extends TcpSocket {
                 reqPqMulti.nonce = CryptoUtils.randomBytes(16);
                 executeAuth(reqPqMulti);
             }
-            reconnectAttemptCount = 0;
             listenForMessage();
         } catch (Exception e) {
             reconnect();
@@ -362,91 +342,88 @@ public class MTProtoClient extends TcpSocket {
     }
 
     private void listenForMessage() {
-        executorService.execute(() -> {
-            while (isConnected()) {
-                try {
-                    MTMessage message = read();
-                    if (message.getMessageLength() == 4) {
-                        int code = new TLInputStream(message.getMessageData()).readInt();
-                        if (code == -404 || code == -444 || code == -429) {
-                            throw new TransportException(code);
-                        }
+        while (isConnected()) {
+            try {
+                MTMessage message = read();
+                if (message.getMessageLength() == 4) {
+                    int code = new TLInputStream(message.getMessageData()).readInt();
+                    if (code == -404 || code == -444 || code == -429) {
+                        throw new TransportException(code);
                     }
-
-                    if (message.getAuthKeyId() != 0) {
-                        int time = (int) (message.getMessageId() >> 32);
-                        int currentTime = (int) (session.getServerTime() / 1000);
-                        int sec = currentTime - time;
-                        if (sec > 300) {
-                            System.err.println(TAG + ".listenForMessage: msg time: " +
-                                    new Date(time * 1000L) + ", server time: " +
-                                    new Date(currentTime * 1000L) + " ignored msg: " + message);
-                            return;
-                        } else if (sec < -30) {
-                            System.err.println(TAG + ".listenForMessage: msg time: " +
-                                    new Date(time * 1000L) + ", server time: " +
-                                    new Date(currentTime * 1000L) + " ignored msg: " + message);
-                            return;
-                        }
-                        if (session.getSessionId() != message.getSessionId()) {
-                            System.err.println(TAG + ".listenForMessage: sessionId does not matched, ignored msg: " +
-                                    message);
-                            return;
-                        }
-
-                    }
-
-                    if (new TLInputStream(message.getMessageData()).readInt() == MsgContainer.ID) {
-                        MsgContainer container = new MsgContainer();
-                        container.read(new TLInputStream(message.getMessageData()));
-                        if (!recvMessages.containsKey(message.getMessageId()) &&
-                                recvMessages.keySet().stream().findFirst().orElse(0L) < message.getMessageId()) {
-                            for (MTMessage mtMessage : container.messageList) {
-                                if (!recvMessages.containsKey(mtMessage.getMessageId()) &&
-                                        recvMessages.keySet().stream().findFirst().orElse(0L) < mtMessage.getMessageId()) {
-                                    mtMessage.setAuthKeyId(message.getAuthKeyId());
-                                    recvMessages.put(mtMessage.getMessageId(), mtMessage);
-                                    onMessageReceived(mtMessage);
-                                } else {
-                                    System.err.println(TAG + ".listenForMessage: msgId exists or lower than all stored msgs, ignored msg: " +
-                                            mtMessage + " older msg: " + recvMessages.get(mtMessage.getMessageId()) +
-                                            ", object: " + TLContext.read(mtMessage.getMessageData()));
-                                }
-                            }
-                            recvMessages.put(message.getMessageId(), message);
-                        } else {
-                            System.err.println(TAG + ".listenForMessage: msgId exists or lower than all stored msgs, ignored msg: " +
-                                    message + " older msg: " + recvMessages.get(message.getMessageId()) +
-                                    ", object: " + TLContext.read(message.getMessageData()));
-                        }
-
-                    } else {
-                        if (!recvMessages.containsKey(message.getMessageId()) &&
-                                recvMessages.keySet().stream().findFirst().orElse(0L) < message.getMessageId()) {
-                            recvMessages.put(message.getMessageId(), message);
-                            onMessageReceived(message);
-                        } else {
-                            System.err.println(TAG + ".listenForMessage: msgId exists or lower than all stored msgs, ignored msg: " +
-                                    message + " older msg: " + recvMessages.get(message.getMessageId()) +
-                                    ", object: " + TLContext.read(message.getMessageData()));
-                        }
-                    }
-                    if (message.getAuthKeyId() != 0) {
-                        session.setOtherPartySeqNo(message.getSeqNo());
-                        if (clientManager != null) {
-                            clientManager.setSession(dcId, session);
-                        }
-                    }
-                } catch (TransportException transportException) {
-                    onTransportError(transportException.getErrorCode());
-                    break;
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    reconnect();
-                    break;
                 }
+
+                if (message.getAuthKeyId() != 0) {
+                    int time = (int) (message.getMessageId() >> 32);
+                    int currentTime = (int) (session.getServerTime() / 1000);
+                    int sec = currentTime - time;
+                    if (sec > 300) {
+                        System.err.println(TAG + ".listenForMessage: msg time: " +
+                                new Date(time * 1000L) + ", server time: " +
+                                new Date(currentTime * 1000L) + " ignored msg: " + message);
+                        return;
+                    } else if (sec < -30) {
+                        System.err.println(TAG + ".listenForMessage: msg time: " +
+                                new Date(time * 1000L) + ", server time: " +
+                                new Date(currentTime * 1000L) + " ignored msg: " + message);
+                        return;
+                    }
+                    if (session.getSessionId() != message.getSessionId()) {
+                        System.err.println(TAG + ".listenForMessage: sessionId does not matched, ignored msg: " +
+                                message);
+                        return;
+                    }
+
+                }
+
+                if (new TLInputStream(message.getMessageData()).readInt() == MsgContainer.ID) {
+                    MsgContainer container = new MsgContainer();
+                    container.read(new TLInputStream(message.getMessageData()));
+                    if (!recvMessages.containsKey(message.getMessageId()) &&
+                            recvMessages.keySet().stream().findFirst().orElse(0L) < message.getMessageId()) {
+                        for (MTMessage mtMessage : container.messageList) {
+                            if (!recvMessages.containsKey(mtMessage.getMessageId()) &&
+                                    recvMessages.keySet().stream().findFirst().orElse(0L) < mtMessage.getMessageId()) {
+                                mtMessage.setAuthKeyId(message.getAuthKeyId());
+                                recvMessages.put(mtMessage.getMessageId(), mtMessage);
+                                onMessageReceived(mtMessage);
+                            } else {
+                                System.err.println(TAG + ".listenForMessage: msgId exists or lower than all stored msgs, ignored msg: " +
+                                        mtMessage + " older msg: " + recvMessages.get(mtMessage.getMessageId()) +
+                                        ", object: " + TLContext.read(mtMessage.getMessageData()));
+                            }
+                        }
+                        recvMessages.put(message.getMessageId(), message);
+                    } else {
+                        System.err.println(TAG + ".listenForMessage: msgId exists or lower than all stored msgs, ignored msg: " +
+                                message + " older msg: " + recvMessages.get(message.getMessageId()) +
+                                ", object: " + TLContext.read(message.getMessageData()));
+                    }
+
+                } else {
+                    if (!recvMessages.containsKey(message.getMessageId()) &&
+                            recvMessages.keySet().stream().findFirst().orElse(0L) < message.getMessageId()) {
+                        recvMessages.put(message.getMessageId(), message);
+                        onMessageReceived(message);
+                    } else {
+                        System.err.println(TAG + ".listenForMessage: msgId exists or lower than all stored msgs, ignored msg: " +
+                                message + " older msg: " + recvMessages.get(message.getMessageId()) +
+                                ", object: " + TLContext.read(message.getMessageData()));
+                    }
+                }
+                if (message.getAuthKeyId() != 0) {
+                    session.setOtherPartySeqNo(message.getSeqNo());
+                    if (clientManager != null) {
+                        clientManager.setSession(dcId, session);
+                    }
+                }
+            } catch (TransportException transportException) {
+                onTransportError(transportException.getErrorCode());
+                break;
+            } catch (Exception e) {
+                reconnect();
+                break;
             }
-        });
+        }
     }
 
     public void createTempAuthKey() {
@@ -494,18 +471,23 @@ public class MTProtoClient extends TcpSocket {
             } else if (object instanceof MTProtoScheme.MsgsAck2 msgsAck) {
                 for (TLLong tlLong : msgsAck.msgIds) {
                     ackedMsgs.add(tlLong.value);
-                    OnMessage onMessage = rpcCallbacks.get(tlLong.value);
-                    if (onMessage != null) {
-                        executorService.execute(() -> onMessage.object(msgsAck));
+                    RpcCallback rpcCallback = rpcCallbacks.get(tlLong.value);
+                    if (rpcCallback != null && rpcCallback.callback != null) {
+                        executorService.execute(() -> rpcCallback.callback.object(msgsAck));
                     }
                 }
             } else if (object instanceof MTProtoScheme.BadMsgNotification2 badMsgNotification) {
                 MTMessage remove = sentMessages.remove(badMsgNotification.badMsgId);
-                FutureResult futureResult = futureResults.remove(badMsgNotification.badMsgId);
+                RpcCallback rpcCallback = rpcCallbacks.remove(badMsgNotification.badMsgId);
                 ackedMsgs.add(badMsgNotification.badMsgId);
-                OnMessage onMessage = rpcCallbacks.remove(badMsgNotification.badMsgId);
-                if (onMessage != null) {
-                    executorService.execute(() -> onMessage.object(badMsgNotification));
+                if (rpcCallback != null) {
+                    if (rpcCallback.callback != null) {
+                        executorService.execute(() -> rpcCallback.callback.object(badMsgNotification));
+                    }
+                    if (remove == null) {
+                        rpcCallback.cancelTimeout();
+                        rpcCallback.future.complete(badMsgNotification);
+                    }
                 }
                 if (remove != null) {
                     if (badMsgNotification.errorCode == 16 || badMsgNotification.errorCode == 17) {
@@ -527,15 +509,10 @@ public class MTProtoClient extends TcpSocket {
                         remove.setSeqNo(session.generateSeqNo(remove.getSeqNo() % 2 != 0));
                     }
                     remove.setMessageId(session.generateMessageId());
-                    if (onMessage != null) {
-                        rpcCallbacks.put(remove.getMessageId(), onMessage);
+                    if (rpcCallback != null) {
+                        rpcCallbacks.put(remove.getMessageId(), rpcCallback);
                     }
-                    futureResults.put(remove.getMessageId(), futureResult);
                     write(remove);
-                } else {
-                    if (futureResult != null) {
-                        futureResult.setResult(badMsgNotification);
-                    }
                 }
             } else if (object instanceof MTProtoScheme.BadServerSalt badMessageSalt) {
                 MTProtoScheme.FutureSalt2 futureSalt = new MTProtoScheme.FutureSalt2();
@@ -548,25 +525,25 @@ public class MTProtoClient extends TcpSocket {
                     clientManager.setSalts(dcId, session.futureSalts);
                 }
                 MTMessage remove = sentMessages.remove(badMessageSalt.badMsgId);
-                FutureResult futureResult = futureResults.remove(badMessageSalt.badMsgId);
                 ackedMsgs.add(badMessageSalt.badMsgId);
-                OnMessage onMessage = rpcCallbacks.remove(badMessageSalt.badMsgId);
-                if (onMessage != null) {
-                    executorService.execute(() -> onMessage.object(badMessageSalt));
+                RpcCallback rpcCallback = rpcCallbacks.remove(badMessageSalt.badMsgId);
+                if (rpcCallback != null) {
+                    if (rpcCallback.callback != null) {
+                        executorService.execute(() -> rpcCallback.callback.object(badMessageSalt));
+                    }
+                    if (remove == null) {
+                        rpcCallback.cancelTimeout();
+                        rpcCallback.future.complete(badMessageSalt);
+                    }
                 }
                 if (remove != null) {
                     remove.setMessageId(session.generateMessageId());
                     remove.setSeqNo(session.generateSeqNo(remove.getSeqNo() % 2 != 0));
                     remove.setSalt(session.getCurrentSalt().salt);
-                    if (onMessage != null) {
-                        rpcCallbacks.put(remove.getMessageId(), onMessage);
+                    if (rpcCallback != null) {
+                        rpcCallbacks.put(remove.getMessageId(), rpcCallback);
                     }
-                    futureResults.put(remove.getMessageId(), futureResult);
                     write(remove);
-                } else {
-                    if (futureResult != null) {
-                        futureResult.setResult(badMessageSalt);
-                    }
                 }
                 if (saltScheduleFuture != null) {
                     saltScheduleFuture.cancel(true);
@@ -589,32 +566,24 @@ public class MTProtoClient extends TcpSocket {
                             (latestSalt.validUntil - (60 * 1)) - (session.getServerTime() / 1000),
                             TimeUnit.SECONDS);
                 }
-                ScheduledFuture<?> scheduledFuture = rpcScheduledFutures.remove(futureSalts2.reqMsgId);
-                if (scheduledFuture != null) {
-                    scheduledFuture.cancel(true);
-                }
-                OnMessage onMessage = rpcCallbacks.remove(futureSalts2.reqMsgId);
-                if (onMessage != null) {
-                    executorService.execute(() -> onMessage.object(object));
-                }
-                FutureResult futureResult = futureResults.remove(futureSalts2.reqMsgId);
-                if (futureResult != null) {
-                    futureResult.setResult(futureSalts2);
+                RpcCallback rpcCallback = rpcCallbacks.remove(futureSalts2.reqMsgId);
+                if (rpcCallback != null) {
+                    if (rpcCallback.callback != null) {
+                        executorService.execute(() -> rpcCallback.callback.object(object));
+                    }
+                    rpcCallback.cancelTimeout();
+                    rpcCallback.future.complete(futureSalts2);
                 }
             } else if (object instanceof MTProtoScheme.RpcResult2 rpcResult) {
-                ScheduledFuture<?> scheduledFuture = rpcScheduledFutures.remove(rpcResult.reqMsgId);
-                if (scheduledFuture != null) {
-                    scheduledFuture.cancel(true);
-                }
-                OnMessage onMessage = rpcCallbacks.remove(rpcResult.reqMsgId);
+                RpcCallback rpcCallback = rpcCallbacks.remove(rpcResult.reqMsgId);
                 sentMessages.remove(rpcResult.reqMsgId);
                 ackedMsgs.add(rpcResult.reqMsgId);
-                if (onMessage != null) {
-                    executorService.execute(() -> onMessage.object(rpcResult.result));
-                }
-                FutureResult futureResult = futureResults.remove(rpcResult.reqMsgId);
-                if (futureResult != null) {
-                    futureResult.setResult(rpcResult.result);
+                if (rpcCallback != null) {
+                    if (rpcCallback.callback != null) {
+                        executorService.execute(() -> rpcCallback.callback.object(rpcResult.result));
+                    }
+                    rpcCallback.cancelTimeout();
+                    rpcCallback.future.complete(rpcResult.result);
                 }
             } else if (object instanceof MTProtoScheme.DestroySessionOk destroySessionOk) {
                 if (protoCallback != null) {
@@ -650,61 +619,44 @@ public class MTProtoClient extends TcpSocket {
             } else if (object instanceof MTProtoScheme.Ping ping) {
                 MTProtoScheme.Pong2 pong2 = new MTProtoScheme.Pong2();
                 pong2.pingId = ping.pingId;
-                executeRpc(pong2);
+                _executeRpc(pong2);
             } else if (object instanceof MTProtoScheme.Pong2 pong) {
                 ackedMsgs.add(pong.msgId);
                 sentMessages.remove(pong.msgId);
-                ScheduledFuture<?> scheduledFuture = rpcScheduledFutures.remove(pong.msgId);
-                if (scheduledFuture != null) {
-                    scheduledFuture.cancel(true);
-                }
-                OnMessage onMessage = rpcCallbacks.remove(pong.msgId);
-                if (onMessage != null) {
-                    executorService.execute(() -> onMessage.object(pong));
-                }
-                FutureResult futureResult = futureResults.remove(pong.msgId);
-                if (futureResult != null) {
-                    futureResult.setResult(pong);
+                RpcCallback rpcCallback = rpcCallbacks.remove(pong.msgId);
+                if (rpcCallback != null) {
+                    if (rpcCallback.callback != null) {
+                        executorService.execute(() -> rpcCallback.callback.object(pong));
+                    }
+                    rpcCallback.future.complete(pong);
                 }
             } else if (object instanceof MTProtoScheme.MsgsStateInfo2 msgsStateInfo) {
-                ScheduledFuture<?> scheduledFuture = rpcScheduledFutures.remove(msgsStateInfo.reqMsgId);
-                if (scheduledFuture != null) {
-                    scheduledFuture.cancel(true);
-                }
-                OnMessage onMessage = rpcCallbacks.remove(msgsStateInfo.reqMsgId);
+                RpcCallback rpcCallback = rpcCallbacks.remove(msgsStateInfo.reqMsgId);
                 sentMessages.remove(msgsStateInfo.reqMsgId);
                 ackedMsgs.add(msgsStateInfo.reqMsgId);
-                if (onMessage != null) {
-                    executorService.execute(() -> onMessage.object(msgsStateInfo));
-                }
-                FutureResult futureResult = futureResults.remove(msgsStateInfo.reqMsgId);
-                if (futureResult != null) {
-                    futureResult.setResult(msgsStateInfo);
+                if (rpcCallback != null) {
+                    if (rpcCallback.callback != null) {
+                        executorService.execute(() -> rpcCallback.callback.object(msgsStateInfo));
+                    }
+                    rpcCallback.future.complete(msgsStateInfo);
                 }
             } else if (object instanceof MTProtoScheme.MsgsAllInfo2 msgsAllInfo) {
                 for (TLLong tlLong : msgsAllInfo.msgIds) {
-                    ScheduledFuture<?> scheduledFuture = rpcScheduledFutures.remove(tlLong.value);
-                    if (scheduledFuture != null) {
-                        scheduledFuture.cancel(true);
-                    }
-                    OnMessage onMessage = rpcCallbacks.remove(tlLong.value);
-                    if (onMessage != null) {
-                        executorService.execute(() -> onMessage.object(msgsAllInfo));
-                    }
-                    FutureResult futureResult = futureResults.remove(tlLong.value);
-                    if (futureResult != null) {
-                        futureResult.setResult(msgsAllInfo);
+                    RpcCallback rpcCallback = rpcCallbacks.remove(tlLong.value);
+                    if (rpcCallback != null) {
+                        if (rpcCallback.callback != null) {
+                            executorService.execute(() -> rpcCallback.callback.object(msgsAllInfo));
+                        }
+                        rpcCallback.future.complete(msgsAllInfo);
                     }
                 }
             } else if (object instanceof MTProtoScheme.MsgDetailedInfo2 msgDetailedInfo) {
                 sentMessages.remove(msgDetailedInfo.msgId);
-                FutureResult futureResult = futureResults.remove(msgDetailedInfo.msgId);
-                if (futureResult != null) {
-                    futureResult.setResult(msgDetailedInfo);
-                }
-                OnMessage onMessage = rpcCallbacks.remove(msgDetailedInfo.msgId);
-                if (onMessage != null) {
-                    executorService.execute(() -> onMessage.object(msgDetailedInfo));
+                RpcCallback rpcCallback = rpcCallbacks.remove(msgDetailedInfo.msgId);
+                if (rpcCallback != null) {
+                    if (rpcCallback.callback != null) {
+                        executorService.execute(() -> rpcCallback.callback.object(msgDetailedInfo));
+                    }
                 }
                 sendAck(msgDetailedInfo.answerMsgId);
             } else if (object instanceof MTProtoScheme.MsgNewDetailedInfo msgNewDetailedInfo) {
@@ -738,20 +690,25 @@ public class MTProtoClient extends TcpSocket {
     }
 
     private void computeAuthKey() throws Exception {
-        authRetryId++;
-        System.err.println(TAG + ".doAuth: authRetry " + authRetryId);
+        System.err.println(TAG + ".computeAuthKey: creating auth key");
 
+        //22047 < p < 22048
         //client secret integer
         BigInteger b = new BigInteger(1, CryptoUtils.randomBytes(256));
         //base g (which is a primitive root modulo p (dhPrime))
-        BigInteger g = new BigInteger(String.valueOf(serverDHInnerData.g));
+        BigInteger g = BigInteger.valueOf(serverDHInnerData.g);
         //modulus p
         BigInteger dhPrime = new BigInteger(1, serverDHInnerData.dhPrime);
         //client public key
         BigInteger gb = g.modPow(b, dhPrime);
+        BigInteger ga = new BigInteger(1, serverDHInnerData.gA);
+
+        CryptoUtils.checkDhParam(dhPrime, g, ga);
+        CryptoUtils.checkDhParam(dhPrime, g, gb);
+
         //shared secret
-        calculatedAuthKey = CryptoUtils.alignKeyZero(new BigInteger(1, serverDHInnerData.gA)
-                .modPow(b, dhPrime).toByteArray(), 256);
+        calculatedAuthKey = CryptoUtils.alignKeyZero(ga.modPow(b, dhPrime).toByteArray(), 256);
+
 
         MTProtoScheme.ClientDHInnerData2 clientDHInnerData = new MTProtoScheme.ClientDHInnerData2();
         if (pqInnerData instanceof MTProtoScheme.PQInnerDataDc pqInnerDataDc) {
@@ -760,6 +717,13 @@ public class MTProtoClient extends TcpSocket {
         } else if (pqInnerData instanceof MTProtoScheme.PQInnerDataTempDc pqInnerDataTempDc) {
             clientDHInnerData.nonce = pqInnerDataTempDc.nonce;
             clientDHInnerData.serverNonce = pqInnerDataTempDc.serverNonce;
+        }
+
+        if (authRetryId != -1) {
+            authRetryId = new TLInputStream(CryptoUtils.substring(CryptoUtils.SHA1(calculatedAuthKey), 0, 8))
+                    .readLong();
+        } else {
+            authRetryId = 0;
         }
         clientDHInnerData.retryId = authRetryId;
         clientDHInnerData.gB = gb.toByteArray();
@@ -814,21 +778,33 @@ public class MTProtoClient extends TcpSocket {
             pqInnerDataDc.p = pqPair.getFirst().toByteArray();
             pqInnerDataDc.q = pqPair.getSecond().toByteArray();
             pqInnerDataDc.pq = resPQ.pq;
-            pqInnerDataDc.dc = 0;
+            pqInnerDataDc.dc = dcId;
             pqInnerDataDc.write(pqInnerDataStream);
             this.pqInnerData = pqInnerDataDc;
         }
 
-        byte[] hash = CryptoUtils.SHA1(pqInnerDataStream.toByteArray());
-        int paddingSize = 255 - (pqInnerDataStream.size() + hash.length);
-        byte[] paddingBytes;
-        if (paddingSize > 0) {
-            paddingBytes = CryptoUtils.randomBytes(paddingSize);
-        } else {
-            paddingBytes = new byte[0];
+        byte[] padding = CryptoUtils.randomBytes(192 - pqInnerDataStream.toByteArray().length);
+        byte[] dataWithPad = CryptoUtils.concat(pqInnerDataStream.toByteArray(), padding);
+        byte[] dataWithPadRev = CryptoUtils.reverse(dataWithPad);
+        byte[] pqInnerDataEncrypted = null;
+        for (int i = 0; i < AUTH_RETRY_LIMIT; i++) {
+            byte[] tempKey = CryptoUtils.randomBytes(32);
+            byte[] dataWithHash = CryptoUtils.concat(dataWithPadRev,
+                    CryptoUtils.SHA256(tempKey, dataWithPad));
+            byte[] aesEncrypted = CryptoUtils.AES256IGEEncrypt(
+                    dataWithHash, new byte[32], tempKey
+            );
+
+            byte[] tempKeyXor = CryptoUtils.xor(tempKey, CryptoUtils.SHA256(aesEncrypted));
+            byte[] keyAesEncrypted = CryptoUtils.concat(tempKeyXor, aesEncrypted);
+            if (selectedPublicRsaKey.getModulus().compareTo(new BigInteger(1, keyAesEncrypted)) <= 0) {
+                System.err.println(TAG + ".processResPQ: keyAesEncrypted >= selectedPublicRsaModulus");
+                continue;
+            }
+
+            pqInnerDataEncrypted = selectedPublicRsaKey.encrypt(keyAesEncrypted);
+            break;
         }
-        byte[] pqInnerWithHash = CryptoUtils.concat(hash, pqInnerDataStream.toByteArray(), paddingBytes);
-        byte[] pqInnerDataEncrypted = selectedPublicRsaKey.encrypt(pqInnerWithHash);
 
         MTProtoScheme.ReqDHParams reqDHParams = new MTProtoScheme.ReqDHParams();
         if (pqInnerData instanceof MTProtoScheme.PQInnerDataDc pqInnerDataDc) {
@@ -848,7 +824,7 @@ public class MTProtoClient extends TcpSocket {
 
 
     //From https://github.com/gram-js/gramjs/blob/198f9ac16eb74a0fdf15b2749674955c1ea31da1/gramjs/crypto/Factorizator.ts#L25
-    private static Pair<BigInteger, BigInteger> factorize(BigInteger pq) {
+    public static Pair<BigInteger, BigInteger> factorize(BigInteger pq) {
         if (pq.remainder(BigInteger.TWO).equals(BigInteger.ZERO)) {
             return new Pair<>(BigInteger.TWO, pq.divide(BigInteger.TWO));
         }
@@ -1049,7 +1025,7 @@ public class MTProtoClient extends TcpSocket {
                             (session.getLatestSalt().validUntil - (60 * 1)) - (session.getServerTime() / 1000),
                             TimeUnit.SECONDS);
                     if (protoCallback != null) {
-                        protoCallback.onStart();
+                        executorService.execute(() -> protoCallback.onStart());
                     }
                 }
             }
@@ -1125,13 +1101,13 @@ public class MTProtoClient extends TcpSocket {
         msgsAck.msgIds = new TLVector<TLLong>(TLLong.class);
         msgsAck.msgIds.isBareTypeItem = true;
         msgsAck.msgIds.add(new TLLong(msgId));
-        executeRpc(msgsAck);
+        _executeRpc(msgsAck);
     }
 
     private Runnable updateSalt = () -> {
         MTProtoScheme.GetFutureSalts getFutureSalts = new MTProtoScheme.GetFutureSalts();
         getFutureSalts.num = 5;
-        executeRpc(getFutureSalts);
+        _executeRpc(getFutureSalts);
     };
 
     public void setProtoCallback(ProtoCallback protoCallback) {
@@ -1150,15 +1126,8 @@ public class MTProtoClient extends TcpSocket {
         messageCallbacks.put(clazz, messageCallback);
     }
 
-    @Override
-    protected void onError(Exception e) {
-        if (!isReconnecting) {
-            reconnect();
-        }
-    }
-
-    public void executeAuth(TLObject object) {
-        executeRpc(object, null, -1, false, false);
+    private void executeAuth(TLObject object) {
+        _executeRpc(object, null, -1, false, false);
     }
 
     /**
@@ -1192,6 +1161,16 @@ public class MTProtoClient extends TcpSocket {
     }
 
     /**
+     * call {@link MTProtoClient#executeRpc(TLObject, OnMessage, long, boolean, boolean)}
+     *
+     * @see MTProtoClient#executeRpc(TLObject, OnMessage, long, boolean, boolean)
+     */
+    public Future<TLObject> executeRpc(TLObject object, OnMessage onMessage, long timeout,
+                                       boolean dropAnswerAfterTimeout) {
+        return executeRpc(object, onMessage, timeout, dropAnswerAfterTimeout, true);
+    }
+
+    /**
      * Send query
      *
      * @param object                 The query
@@ -1203,20 +1182,30 @@ public class MTProtoClient extends TcpSocket {
      * @param dropAnswerAfterTimeout whether to send {@link com.fakhruddin.mtproto.tl.MTProtoScheme.RpcDropAnswer2}
      *                               after timeout to tell the server to not send answer for this query
      * @param authRequired           Whether to use encryption for this query
-     * @return return {@link FutureResult} to retrieve result
+     * @return return {@link Future<TLObject>} to retrieve result
      */
     public synchronized Future<TLObject> executeRpc(TLObject object, OnMessage callback, long timeout, boolean dropAnswerAfterTimeout,
                                                     boolean authRequired) {
-        FutureResult futureResult = new FutureResult();
+        return _executeRpc(object, callback, timeout, dropAnswerAfterTimeout, authRequired);
+    }
+
+    private Future<TLObject> _executeRpc(TLObject object) {
+        return _executeRpc(object, null, -1, false, true);
+    }
+
+    private synchronized Future<TLObject> _executeRpc(TLObject object, OnMessage callback, long timeout, boolean dropAnswerAfterTimeout,
+                                                      boolean authRequired) {
+        RpcCallback rpcCallback = new RpcCallback();
+        rpcCallback.callback = callback;
         if (!isConnected()) {
-            if (callback != null) {
-                MTProtoScheme.RpcError2 rpcError = new MTProtoScheme.RpcError2();
-                rpcError.errorCode = -1;
-                rpcError.errorMessage = "CONNECTION_CLOSED";
-                callback.object(rpcError);
-                futureResult.cancel(false);
+            MTProtoScheme.RpcError2 rpcError = new MTProtoScheme.RpcError2();
+            rpcError.errorCode = -1;
+            rpcError.errorMessage = "CONNECTION_CLOSED";
+            rpcCallback.future.completeExceptionally(new RpcException(rpcError));
+            if (rpcCallback.callback != null) {
+                rpcCallback.callback.object(rpcError);
             }
-            return futureResult;
+            return rpcCallback.future;
         }
         try {
             MTMessage message;
@@ -1248,50 +1237,53 @@ public class MTProtoClient extends TcpSocket {
             message.setMessageId(session.generateMessageId());
             message.setMessageData(object);
             System.out.println(TAG + ".executeRpc: reqMsgId " + message.getMessageId() + " " + object);
-            if (callback != null) {
-                ScheduledFuture<?> schedule = null;
-                if (timeout > 0) {
-                    schedule = scheduleExecutorService.schedule(() -> {
-                        MTProtoScheme.RpcError2 error2 = new MTProtoScheme.RpcError2();
-                        //-1 errorCode for custom errors
-                        error2.errorCode = -1;
-                        error2.errorMessage = "Timeout";
-                        callback.object(error2);
-                        futureResult.cancel(false);
+
+            if (timeout > 0) {
+                MTProtoScheme.RpcError2 rpcError = new MTProtoScheme.RpcError2();
+                //-1 errorCode for custom errors
+                rpcError.errorCode = -1;
+                rpcError.errorMessage = "Timeout";
+
+                if (rpcCallback.callback != null || dropAnswerAfterTimeout) {
+                    rpcCallback.scheduledFuture = scheduleExecutorService.schedule(() -> {
+                        if (rpcCallback.callback != null) {
+                            rpcCallback.callback.object(rpcError);
+                        }
                         if (dropAnswerAfterTimeout) {
                             MTProtoScheme.RpcDropAnswer2 rpcDropAnswer2 = new MTProtoScheme.RpcDropAnswer2();
                             rpcDropAnswer2.reqMsgId = message.getMessageId();
-                            executeRpc(rpcDropAnswer2);
+                            _executeRpc(rpcDropAnswer2, null, -1,
+                                    false, authRequired);
                         }
+                        rpcCallback.future.completeExceptionally(new RpcException(rpcError));
                     }, timeout, TimeUnit.MILLISECONDS);
-                    rpcScheduledFutures.put(message.getMessageId(), schedule);
                 }
-                rpcCallbacks.put(message.getMessageId(), callback);
             }
-            futureResult.setTimeout(timeout);
-            futureResults.put(message.getMessageId(), futureResult);
+            rpcCallback.msgId = message.getMessageId();
+            rpcCallbacks.put(message.getMessageId(), rpcCallback);
             write(message);
-            return futureResult;
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return futureResult;
+        return rpcCallback.future;
     }
 
+
     public Future<TLObject> bindTempAuthKey(MTMessage message) {
-        FutureResult futureResult = new FutureResult();
-        futureResults.put(message.getMessageId(), futureResult);
+        RpcCallback rpcCallback = new RpcCallback();
+        rpcCallback.msgId = message.getMessageId();
+        rpcCallbacks.put(message.getMessageId(), rpcCallback);
         try {
             write(message);
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return futureResult;
+        return rpcCallback.future;
     }
 
     public void write(MTMessage message) throws Exception {
         message.setMTProtoVersion(mtProtoVersion);
-        message.setClient(true);
+        message.setX(0);
 
         if (clientManager != null) {
             clientManager.setSession(dcId, session);
@@ -1304,7 +1296,7 @@ public class MTProtoClient extends TcpSocket {
             pingDelayScheduleFuture = scheduleExecutorService.schedule(() -> {
                 MTProtoScheme.Ping ping = new MTProtoScheme.Ping();
                 ping.pingId = CryptoUtils.randomLong();
-                executeRpc(ping);
+                _executeRpc(ping);
             }, this.pingDelay, TimeUnit.SECONDS);
 
         }
@@ -1340,6 +1332,7 @@ public class MTProtoClient extends TcpSocket {
             message = new MTMessage(authKey);
         }
         message.setMTProtoVersion(mtProtoVersion);
+        message.setX(8);
         message.read(tlInputStream);
         return message;
     }
@@ -1371,9 +1364,22 @@ public class MTProtoClient extends TcpSocket {
     }
 
     private void reconnect() {
+        if (saltScheduleFuture != null) {
+            saltScheduleFuture.cancel(true);
+        }
+        if (pingDelayScheduleFuture != null) {
+            pingDelayScheduleFuture.cancel(true);
+        }
+        if (tempAuthScheduleFuture != null) {
+            tempAuthScheduleFuture.cancel(true);
+        }
         while ((reconnectLimit > reconnectAttemptCount || reconnectLimit == -1) && !isClosed) {
             isReconnecting = true;
-            super.close(true);
+            try {
+                super.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException ignored) {
@@ -1391,7 +1397,6 @@ public class MTProtoClient extends TcpSocket {
                     }
                 }
             } catch (Exception e) {
-                onError(e);
                 if (protoCallback != null) {
                     protoCallback.onClose();
                 }
@@ -1406,9 +1411,15 @@ public class MTProtoClient extends TcpSocket {
     @Override
     public void close() {
         isClosed = true;
-        super.close();
+        executorService.execute(() -> {
+            try {
+                super.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
         if (executorService != null) {
-            executorService.shutdownNow();
+            executorService.shutdown();
         }
         if (scheduleExecutorService != null) {
             scheduleExecutorService.shutdownNow();
@@ -1421,7 +1432,6 @@ public class MTProtoClient extends TcpSocket {
         recvMessages.clear();
         ackedMsgs.clear();
     }
-
 
     @Override
     public String toString() {

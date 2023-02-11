@@ -21,45 +21,31 @@ public abstract class TcpServer {
         this.port = port;
     }
 
-    private boolean serverConnection() {
-        try {
-            serverSocket = new ServerSocket(port);
-            serverSocket.setSoTimeout(0);
-            return true;
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return false;
-    }
-
-    private boolean acceptClient() {
-        try {
-            Socket socket = serverSocket.accept();
-            socket.setSoTimeout(timeout);
-            socket.setReceiveBufferSize(bufferSize);
-            onClient(socket);
-            return true;
-        } catch (Exception e) {
-            onError(e);
-            e.printStackTrace();
-        }
-        return false;
-    }
-
     protected abstract void onClient(Socket socket);
-
-    protected abstract void onError(Exception e);
 
     public void start() {
         connectionThread.submit(() -> {
-            isConnected = serverConnection();
+            try {
+                serverSocket = new ServerSocket(port);
+                serverSocket.setSoTimeout(0);
+                isConnected = true;
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
             if (isConnected()) {
                 System.out.println(TAG + ".start: server started");
             } else {
                 System.err.println(TAG + ".start: server not started");
             }
             while (isConnected()) {
-                acceptClient();
+                try {
+                    Socket socket = serverSocket.accept();
+                    socket.setSoTimeout(timeout);
+                    socket.setReceiveBufferSize(bufferSize);
+                    onClient(socket);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
         });
     }
@@ -76,7 +62,7 @@ public abstract class TcpServer {
             }
         });
         if (!connectionThread.isShutdown()) {
-            connectionThread.shutdownNow();
+            connectionThread.shutdown();
         }
 
     }

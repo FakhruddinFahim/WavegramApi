@@ -20,14 +20,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * Created by Fakhruddin Fahim on 22/07/2022
  */
 public class JsonClientManager extends ClientManager {
-    File file;
-    String fileName = "ClientManager.json";
+    File file = new File("ClientManager.json");
 
     public JsonClientManager() {
-        file = new File(fileName);
+
     }
 
-    static ReentrantLock reentrantLock = new ReentrantLock(true);
+    ReentrantLock reentrantLock = new ReentrantLock(true);
 
     @Override
     public void setDcId(int dcId) {
@@ -50,8 +49,9 @@ public class JsonClientManager extends ClientManager {
             }
         } catch (Exception e) {
             e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
     }
 
 
@@ -59,19 +59,20 @@ public class JsonClientManager extends ClientManager {
     public int getDcId() {
         reentrantLock.lock();
         int dc = -1;
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
                 if (jsonObject.has("dcId")) {
                     dc = jsonObject.getInt("dcId");
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
         return dc;
     }
 
@@ -79,8 +80,8 @@ public class JsonClientManager extends ClientManager {
     public AuthKey getAuthKey(int dcId, AuthKey.Type type) {
         reentrantLock.lock();
         AuthKey authKey = null;
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
@@ -100,11 +101,12 @@ public class JsonClientManager extends ClientManager {
                         authKey = null;
                     }
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
         return authKey;
     }
 
@@ -150,15 +152,17 @@ public class JsonClientManager extends ClientManager {
             }
         } catch (Exception e) {
             e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
     }
 
     @Override
     public synchronized void deleteAuthKey(int dcId, AuthKey.Type type) {
         reentrantLock.lock();
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
+
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 if (jsonObject.has(String.valueOf(dcId))) {
@@ -177,18 +181,19 @@ public class JsonClientManager extends ClientManager {
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
                 fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
     }
 
     @Override
     public synchronized void setSession(int dcId, MTSession session) {
         reentrantLock.lock();
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
@@ -212,39 +217,39 @@ public class JsonClientManager extends ClientManager {
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
                 fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        } else {
-            JSONObject jsonObject = new JSONObject();
-            JSONObject dc = new JSONObject();
-            JSONObject jsonSession = new JSONObject();
-            jsonSession.put("sessionId", session.getSessionId());
-            jsonSession.put("uniqueId", session.getUniqueId());
-            jsonSession.put("serverTimeOffset", session.getServerTimeOffset());
-            jsonSession.put("otherPartySeqNo", session.getOtherPartySeqNo());
-            jsonSession.put("contentRelatedCount", session.getContentRelatedCount());
-            jsonSession.put("firstMessageId", session.getFirstMessageId());
-            jsonSession.put("lastMessageId", session.getLastMessageId());
-            dc.put("session", jsonSession);
-            jsonObject.put(String.valueOf(dcId), dc);
-            try {
+
+            } else {
+                JSONObject jsonObject = new JSONObject();
+                JSONObject dc = new JSONObject();
+                JSONObject jsonSession = new JSONObject();
+                jsonSession.put("sessionId", session.getSessionId());
+                jsonSession.put("uniqueId", session.getUniqueId());
+                jsonSession.put("serverTimeOffset", session.getServerTimeOffset());
+                jsonSession.put("otherPartySeqNo", session.getOtherPartySeqNo());
+                jsonSession.put("contentRelatedCount", session.getContentRelatedCount());
+                jsonSession.put("firstMessageId", session.getFirstMessageId());
+                jsonSession.put("lastMessageId", session.getLastMessageId());
+                dc.put("session", jsonSession);
+                jsonObject.put(String.valueOf(dcId), dc);
+
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
                 fileOutputStream.write(jsonObject.toString().getBytes());
                 fileOutputStream.close();
-            } catch (Exception ee) {
-                ee.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
     }
 
     @Override
     public MTSession getSession(int dcId) {
         reentrantLock.lock();
         MTSession session = null;
-        if (file.exists()) {
-            try (FileInputStream fileInputStream = new FileInputStream(file)) {
+        try {
+            if (file.exists()) {
+                FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 if (jsonObject.has(String.valueOf(dcId))) {
                     JSONObject dc = jsonObject.getJSONObject(String.valueOf(dcId));
@@ -260,19 +265,21 @@ public class JsonClientManager extends ClientManager {
                         session.setLastMessageId(jsonSession.getInt("lastMessageId"));
                     }
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
+
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
         return session;
     }
 
     @Override
     public synchronized void deleteSession(int dcId) {
         reentrantLock.lock();
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 if (jsonObject.has(String.valueOf(dcId))) {
@@ -284,19 +291,20 @@ public class JsonClientManager extends ClientManager {
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
                 fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
     }
 
     @Override
     public List<MTProtoScheme.FutureSalt2> getSalts(int dcId) {
         reentrantLock.lock();
         List<MTProtoScheme.FutureSalt2> futureSalts = new ArrayList<>();
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
@@ -313,19 +321,20 @@ public class JsonClientManager extends ClientManager {
                         }
                     }
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
         return futureSalts;
     }
 
     @Override
     public synchronized void setSalts(int dcId, List<MTProtoScheme.FutureSalt2> futureSalts) {
         reentrantLock.lock();
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
@@ -347,11 +356,12 @@ public class JsonClientManager extends ClientManager {
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
                 fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
     }
 
 }

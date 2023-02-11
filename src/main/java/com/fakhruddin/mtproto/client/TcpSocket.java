@@ -1,7 +1,5 @@
 package com.fakhruddin.mtproto.client;
 
-import com.mysql.cj.exceptions.WrongArgumentException;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,7 +11,7 @@ import java.net.Socket;
 /**
  * Created by Fakhruddin Fahim on 03/02/2021
  */
-public abstract class TcpSocket {
+public class TcpSocket {
     private static final String TAG = "TcpSocket";
 
     private int port = -1;
@@ -23,11 +21,10 @@ public abstract class TcpSocket {
 
     protected Socket socket;
     protected InputStream inputStream;
-    public OutputStream outputStream;
+    protected OutputStream outputStream;
     protected int bufferSize = 1024 * 1024 * 2;
     protected volatile boolean isConnected = false;
     protected int timeout = 1000 * 10;
-    protected Thread connectionThread;
     protected ProxyType proxyType = ProxyType.SOCKS5H;
     protected String proxyUsername = null;
     protected String proxyPassword = null;
@@ -102,13 +99,14 @@ public abstract class TcpSocket {
         } else {
             socket.connect(new InetSocketAddress(host, port));
         }
-        if ((isConnected = socket.isConnected())) {
+        if (socket.isConnected()) {
             inputStream = socket.getInputStream();
             outputStream = socket.getOutputStream();
             if (proxyHost != null) {
                 connectToProxy();
             }
         }
+        isConnected = true;
         return isConnected;
     }
 
@@ -177,7 +175,7 @@ public abstract class TcpSocket {
                     int authVersion = inputStream.read();
                     int authStatus = inputStream.read();
                     if (authStatus != 0) {
-                        throw new WrongArgumentException("Username or password wrong");
+                        throw new IllegalArgumentException("Username or password wrong");
                     }
                 } else {
                     throw new IllegalStateException("Username or password null");
@@ -285,78 +283,10 @@ public abstract class TcpSocket {
         return buf;
     }
 
-    protected abstract void onStart();
-
-    protected abstract void onError(Exception e);
-
-    /**
-     * Run on a thread
-     */
-    public void start() {
-        if (isConnected()) {
-            return;
-        }
-        connectionThread = new Thread(() -> {
-            try {
-                if (connect()) {
-                    onStart();
-                } else {
-                    onError(new IOException());
-                }
-            } catch (Exception e) {
-                onError(e);
-            }
-        });
-        connectionThread.setName(TAG);
-        connectionThread.start();
-    }
-
-    /**
-     * Run on current thread
-     */
-    public void run() {
-        if (isConnected()) {
-            return;
-        }
-        try {
-            if (connect()) {
-                onStart();
-            } else {
-                onError(new IOException());
-            }
-        } catch (Exception e) {
-            onError(e);
-        }
-    }
-
-
-    public void close() {
-        close(false);
-    }
-
-    public void close(boolean closeOnCurrentThread) {
+    public void close() throws IOException {
         isConnected = false;
-        if (closeOnCurrentThread) {
-            try {
-                if (socket != null && !socket.isClosed()) {
-                    socket.close();
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        } else {
-            new Thread(() -> {
-                try {
-                    if (socket != null && !socket.isClosed()) {
-                        socket.close();
-                    }
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-                if (connectionThread != null){
-                    connectionThread.interrupt();
-                }
-            }).start();
+        if (socket != null && !socket.isClosed()) {
+            socket.close();
         }
     }
 

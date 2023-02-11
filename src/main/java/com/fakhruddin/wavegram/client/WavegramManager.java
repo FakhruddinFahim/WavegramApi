@@ -12,4 +12,7 @@ public abstract class WavegramManager {
     public abstract int[] getLoggedInDcs();
     public abstract void addLoggedInDcId(int dcId);
     public abstract void removeLoggedInDcId(int dcId);
+    public abstract void addSecretChat(long chatId, WavegramClient.SecretChat secretChat);
+    public abstract WavegramClient.SecretChat getSecretChat(long chatId);
+    public abstract void discardSecretChat(long chatId);
 }

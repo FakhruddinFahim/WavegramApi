@@ -19,7 +19,7 @@ public class MTProtoServer extends TcpServer {
 
     private ProtoCallback protoCallback;
     private ServerManager serverManager;
-    private List<RsaKey> rsaPrivateKeys = new ArrayList<>();
+    protected List<RsaKey> rsaPrivateKeys = new ArrayList<>();
     public int thisDc = 0;
     public Map<Long, Map<Long, MTClient>> clients = new HashMap<>();
 
@@ -146,8 +146,4 @@ public class MTProtoServer extends TcpServer {
         this.protoCallback = protoCallback;
     }
 
-    @Override
-    protected void onError(Exception e) {
-
-    }
 }

@@ -26,6 +26,35 @@ public final class CryptoUtils {
 
     }
 
+    public static void checkDhParam(BigInteger p, BigInteger g, BigInteger ga) throws SecurityException{
+        if (p.bitLength() != 2048) {
+            throw new SecurityException("p != 2048-bit");
+        }
+        if (!p.isProbablePrime(10) ||
+                !p.subtract(BigInteger.ONE).divide(BigInteger.TWO).isProbablePrime(10)) {
+            throw new SecurityException("p or (p-1)/2 are not prime");
+        }
+        if (BigInteger.TWO.pow(2047).compareTo(p) >= 0 ||
+                BigInteger.TWO.pow(2048).compareTo(p) <= 0
+        ) {
+            throw new SecurityException("invalid 2^2047 < p < 2^2048");
+        }
+
+        if (g.compareTo(BigInteger.ONE) <= 0 || g.compareTo(p.subtract(BigInteger.ONE)) >= 0) {
+            throw new SecurityException("invalid 1 < g < p-1");
+        }
+
+        if (ga.compareTo(BigInteger.ONE) <= 0 || ga.compareTo(p.subtract(BigInteger.ONE)) >= 0) {
+            throw new SecurityException("invalid 1 < ga < p-1");
+        }
+
+        BigInteger subtract = p.subtract(BigInteger.TWO.pow(2048 - 64));
+        if (ga.compareTo(BigInteger.TWO.pow(2048 - 64)) < 0 ||
+                ga.compareTo(subtract) > 0) {
+            throw new SecurityException("invalid 2^{2048-64} <= ga <= p - 2^{2048-64} ");
+        }
+    }
+
     public static byte[] randomBytes(int length) {
         SecureRandom secureRandom = new SecureRandom();
         secureRandom.setSeed(System.currentTimeMillis());
@@ -38,6 +67,12 @@ public final class CryptoUtils {
         SecureRandom secureRandom = new SecureRandom();
         secureRandom.setSeed(System.currentTimeMillis());
         return secureRandom.nextLong();
+    }
+
+    public static int randomInt() {
+        SecureRandom secureRandom = new SecureRandom();
+        secureRandom.setSeed(System.currentTimeMillis());
+        return secureRandom.nextInt();
     }
 
     public static byte[] reverse(byte[] buffer) {
@@ -192,12 +227,20 @@ public final class CryptoUtils {
         return res;
     }
 
-    public static String MD5(byte[] src) {
+    public static void AES256IGEDecrypt(InputStream inputStream, OutputStream outputStream, byte[] iv, byte[] key) throws IOException {
+        currentImplementation.AES256IGEDecrypt(inputStream, outputStream, iv, key);
+    }
+
+    public static void AES256IGEEncrypt(InputStream inputStream, OutputStream outputStream, byte[] iv, byte[] key) throws IOException {
+        currentImplementation.AES256IGEEncrypt(inputStream, outputStream, iv, key);
+    }
+
+    public static byte[] MD5(byte[] src) {
         try {
             MessageDigest crypt = MessageDigest.getInstance("MD5");
             crypt.reset();
             crypt.update(src);
-            return ToHex(crypt.digest());
+            return crypt.digest();
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
@@ -205,7 +248,7 @@ public final class CryptoUtils {
         return null;
     }
 
-    public static String MD5(InputStream inputStream) {
+    public static byte[] MD5(InputStream inputStream) {
         try {
             MessageDigest crypt = MessageDigest.getInstance("MD5");
             crypt.reset();
@@ -214,7 +257,7 @@ public final class CryptoUtils {
             while ((bytesRead = inputStream.read(buffer, 0, 1024)) != -1) {
                 crypt.update(buffer, 0, bytesRead);
             }
-            return ToHex(crypt.digest());
+            return crypt.digest();
         } catch (NoSuchAlgorithmException | IOException e) {
             e.printStackTrace();
         }
@@ -232,7 +275,7 @@ public final class CryptoUtils {
                 randomAccessFile.readFully(block, 0, len);
                 crypt.update(block, 0, len);
             }
-            return ToHex(crypt.digest());
+            return toHex(crypt.digest());
         } catch (IOException e) {
             e.printStackTrace();
         } catch (NoSuchAlgorithmException e) {
@@ -249,7 +292,7 @@ public final class CryptoUtils {
         return crypt.digest();
     }
 
-    public static String ToHex(byte[] src) {
+    public static String toHex(byte[] src) {
         String res = "";
         for (int i = 0; i < src.length; i++) {
             res += String.format("%02X", src[i] & 0xFF);

@@ -24,7 +24,11 @@ public class MTMessage {
     private int messageLength = 0;
     private byte[] messageData;
 
-    private boolean isClient = true;
+    private int x = 0;
+
+    private boolean e2e = false;
+    byte[] paddingBytes;
+
     private MTProtoVersion mtProtoVersion = MTProtoVersion.MTPROTO_2_0;
 
     public MTMessage() {
@@ -35,6 +39,10 @@ public class MTMessage {
         this.authKey = authKey;
     }
 
+
+    public void setE2e(boolean e2e) {
+        this.e2e = e2e;
+    }
 
     public MTProtoVersion getMTProtoVersion() {
         return mtProtoVersion;
@@ -84,8 +92,8 @@ public class MTMessage {
         this.seqNo = seqNo;
     }
 
-    public void setClient(boolean client) {
-        isClient = client;
+    public void setX(int x) {
+        this.x = x;
     }
 
     public void setMessageId(long messageId) {
@@ -98,6 +106,7 @@ public class MTMessage {
 
     public void setMessageData(byte[] messageData) {
         this.messageData = messageData;
+        this.messageLength = this.messageData.length;
     }
 
     public void setMessageData(TLObject object) {
@@ -108,6 +117,7 @@ public class MTMessage {
             e.printStackTrace();
         }
         this.messageData = outputStream.toByteArray();
+        this.messageLength = this.messageData.length;
     }
 
     public byte[] getMessageData() {
@@ -189,17 +199,23 @@ public class MTMessage {
         if (authKey != null) {
             outputStream.writeLong(authKey.getAuthKeyId());
             TLOutputStream unencryptedData = new TLOutputStream();
-            //server salt
-            unencryptedData.writeLong(salt);
-            //session id
-            unencryptedData.writeLong(sessionId);
-            writeBody(unencryptedData);
+
+            if (!e2e) {
+                //server salt
+                unencryptedData.writeLong(salt);
+                //session id
+                unencryptedData.writeLong(sessionId);
+                writeBody(unencryptedData);
+            } else {
+                unencryptedData.writeInt(messageLength);
+                unencryptedData.writeBytes(messageData);
+            }
             byte[] unencryptedDataWithPad;
             if (mtProtoVersion == MTProtoVersion.MTPROTO_2_0) {
                 unencryptedData.write(CryptoUtils.randomBytes(12));
                 unencryptedDataWithPad = CryptoUtils.align(unencryptedData.toByteArray(), 16);
                 byte[] msgKeyLarge = CryptoUtils.SHA256(
-                        CryptoUtils.substring(authKey.getAuthKey(), 88 + (isClient ? 0 : 8), 32),
+                        CryptoUtils.substring(authKey.getAuthKey(), 88 + x, 32),
                         unencryptedDataWithPad);
                 messageKey = CryptoUtils.substring(msgKeyLarge, 8, 16);
             } else {
@@ -207,7 +223,7 @@ public class MTMessage {
                 unencryptedDataWithPad = CryptoUtils.align(unencryptedData.toByteArray(), 16);
             }
             //encrypt data
-            Pair<byte[], byte[]> aesKeyIvPair = computeAESKeyAndIV(messageKey, isClient ? 0 : 8);
+            Pair<byte[], byte[]> aesKeyIvPair = computeAESKeyAndIV(messageKey, x);
             byte[] encryptedData = CryptoUtils.AES256IGEEncrypt(unencryptedDataWithPad, aesKeyIvPair.getSecond(), aesKeyIvPair.getFirst());
 
             outputStream.write(messageKey);
@@ -225,7 +241,6 @@ public class MTMessage {
         //seq number
         outputStream.writeInt(seqNo);
         //message length
-        messageLength = this.messageData.length;
         outputStream.writeInt(this.messageData.length);
         //message
         outputStream.write(this.messageData);
@@ -235,7 +250,6 @@ public class MTMessage {
         //message id
         outputStream.writeLong(messageId);
         //message length
-        messageLength = this.messageData.length;
         outputStream.writeInt(this.messageData.length);
         //message
         outputStream.write(this.messageData);
@@ -251,7 +265,7 @@ public class MTMessage {
                 throw new IllegalStateException("authId expected " + authKey.getAuthKeyId() + ", received " + authKeyId);
             }
             messageKey = inputStream.readBytes(16);
-            Pair<byte[], byte[]> aesKeyIvPair = computeAESKeyAndIV(messageKey, isClient ? 8 : 0);
+            Pair<byte[], byte[]> aesKeyIvPair = computeAESKeyAndIV(messageKey, x);
             int bytesRead = 0;
             byte[] buffer = new byte[1024];
             TLOutputStream encryptedData = new TLOutputStream();
@@ -267,7 +281,7 @@ public class MTMessage {
 
             if (mtProtoVersion == MTProtoVersion.MTPROTO_2_0) {
                 byte[] msgKeyLarge = CryptoUtils.SHA256(
-                        CryptoUtils.substring(authKey.getAuthKey(), 88 + (isClient ? 8 : 0), 32),
+                        CryptoUtils.substring(authKey.getAuthKey(), 88 + x, 32),
                         unencryptedData);
                 byte[] calcMessageKey = CryptoUtils.substring(msgKeyLarge, 8, 16);
                 if (!Arrays.equals(messageKey, calcMessageKey)) {
@@ -276,25 +290,34 @@ public class MTMessage {
             }
 
             TLInputStream unencryptedStream = new TLInputStream(unencryptedData);
-            salt = unencryptedStream.readLong();
-            sessionId = unencryptedStream.readLong();
-            readBody(unencryptedStream);
-            // serverSalt(8) + sessionId(8) + messageId(8) + seqNo(4) + msgLen(4)
-            int paddingSize = unencryptedData.length - messageLength - 32;
-            if (mtProtoVersion == MTProtoVersion.MTPROTO_1_0) {
-                byte[] calcMessageKey = CryptoUtils.substring(
-                        CryptoUtils.SHA1(CryptoUtils.substring(unencryptedData, 0,
-                                unencryptedData.length - paddingSize)), 4, 16);
-                if (!Arrays.equals(messageKey, calcMessageKey)) {
-                    throw new IllegalStateException("received msgKey and calculated msgKey does not match");
+            if (!e2e) {
+                salt = unencryptedStream.readLong();
+                sessionId = unencryptedStream.readLong();
+                readBody(unencryptedStream);
+                // serverSalt(8) + sessionId(8) + messageId(8) + seqNo(4) + msgLen(4)
+                int paddingSize = unencryptedData.length - messageLength - 32;
+                if (mtProtoVersion == MTProtoVersion.MTPROTO_1_0) {
+                    byte[] calcMessageKey = CryptoUtils.substring(
+                            CryptoUtils.SHA1(CryptoUtils.substring(unencryptedData, 0,
+                                    unencryptedData.length - paddingSize)), 4, 16);
+                    if (!Arrays.equals(messageKey, calcMessageKey)) {
+                        throw new IllegalStateException("received msgKey and calculated msgKey does not match");
+                    }
+                    if (paddingSize > 16) {
+                        throw new IllegalStateException("padding length is greater than 16");
+                    }
+                } else {
+                    if (paddingSize < 12 || paddingSize > 1024) {
+                        throw new IllegalStateException("padding length is not between 12-1024");
+                    }
                 }
-                if (paddingSize > 16){
-                    throw new IllegalStateException("padding length is greater than 16");
+            } else {
+                messageLength = unencryptedStream.readInt();
+                if (messageLength % 4 != 0) {
+                    throw new SecurityException("The length should be divisible by 4");
                 }
-            }else{
-                if (paddingSize < 12 || paddingSize > 1024){
-                    throw new IllegalStateException("padding length is not between 12-1024");
-                }
+                messageData = unencryptedStream.readBytes(messageLength);
+                paddingBytes = unencryptedStream.readAllBytes();
             }
         } else {
             readUnencryptedBody(inputStream);
@@ -305,8 +328,8 @@ public class MTMessage {
         messageId = inputStream.readLong();
         seqNo = inputStream.readInt();
         messageLength = inputStream.readInt();
-        if (messageLength % 4 != 0){
-            throw new SecurityException("The length should be divisible by 16");
+        if (messageLength % 4 != 0) {
+            throw new SecurityException("The length should be divisible by 4");
         }
         messageData = inputStream.readBytes(messageLength);
     }
@@ -324,7 +347,7 @@ public class MTMessage {
         inputStream.position(0);
         if (authKey.getAuthKeyId() == authKeyId) {
             MTMessage mtMessage = new MTMessage(authKey);
-            mtMessage.setClient(false);
+            mtMessage.setX(0);
             mtMessage.setMTProtoVersion(MTProtoVersion.MTPROTO_2_0);
             try {
                 mtMessage.read(inputStream);
@@ -354,7 +377,7 @@ public class MTMessage {
                 ", seqNo=" + seqNo +
                 ", messageLength=" + messageLength +
 //                ", messageData=" + Arrays.toString(messageData) +
-                ", isClient=" + isClient +
+                ", x=" + x +
                 ", mtProtoVersion=" + mtProtoVersion +
                 '}';
     }

@@ -2,6 +2,7 @@ package com.fakhruddin.wavegram.client;
 
 import com.fakhruddin.mtproto.AuthKey;
 import com.fakhruddin.mtproto.MTSession;
+import com.fakhruddin.mtproto.client.ClientManager;
 import com.fakhruddin.mtproto.client.MTProtoClient;
 import com.fakhruddin.mtproto.client.ProtoCallback;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
@@ -28,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class WavegramDownloader {
     private static final String TAG = "WavegramDownloader";
-    private WavegramClient wavegramClient;
+    private final WavegramClient wavegramClient;
     public static final int MIN_CHUNK_SIZE = 4096;
     public static final int MIN_CHUNK_SIZE_PRECISE = 1024;
     public static final int MAX_CHUNK_SIZE = 1024 * 1024;
@@ -37,19 +38,20 @@ public class WavegramDownloader {
     ExecutorService executorService;
     int parallelDownloadLimit = 2;
     int threadPerDownload = 2;
-    private Map<Long, List<MTProtoClient>> protoClients = new HashMap<>();
-    private Map<Long, Future<?>> futures = new HashMap<>();
-    private List<DownloadFile> downloadFiles = new ArrayList<>();
-    private Map<Long, ExecutorService> downloadExecutorServiceMap = new HashMap<>();
+    private final Map<Long, List<MTProtoClient>> protoClients = new HashMap<>();
+    private final Map<Long, Future<?>> futures = new HashMap<>();
+    private final List<DownloadFile> downloadFiles = new ArrayList<>();
+    private final Map<Long, ExecutorService> downloadExecutorServiceMap = new HashMap<>();
     private String rootPath = "";
 
-    private static class DownloadClientManager extends JsonClientManager {
+    private static class DownloadClientManager extends ClientManager {
+        private final DownloadFile downloadFile;
 
-        private int dcId = 0;
-        private DownloadFile downloadFile;
+        private final ClientManager clientManager;
 
-        public DownloadClientManager(DownloadFile downloadFile) {
+        public DownloadClientManager(DownloadFile downloadFile, ClientManager clientManager) {
             this.downloadFile = downloadFile;
+            this.clientManager = clientManager;
         }
 
         @Override
@@ -63,6 +65,28 @@ public class WavegramDownloader {
         }
 
         @Override
+        public AuthKey getAuthKey(int dcId, AuthKey.Type type) {
+            if (clientManager != null) {
+                return clientManager.getAuthKey(dcId, type);
+            }
+            return null;
+        }
+
+        @Override
+        public void setAuthKey(int dcId, AuthKey authKey) {
+            if (clientManager != null) {
+                clientManager.setAuthKey(dcId, authKey);
+            }
+        }
+
+        @Override
+        public void deleteAuthKey(int dcId, AuthKey.Type type) {
+            if (clientManager != null) {
+                clientManager.deleteAuthKey(dcId, type);
+            }
+        }
+
+        @Override
         public void setSession(int dcId, MTSession session) {
 
         }
@@ -70,6 +94,26 @@ public class WavegramDownloader {
         @Override
         public MTSession getSession(int dcId) {
             return null;
+        }
+
+        @Override
+        public void deleteSession(int dcId) {
+
+        }
+
+        @Override
+        public List<MTProtoScheme.FutureSalt2> getSalts(int dcId) {
+            if (clientManager != null) {
+                return clientManager.getSalts(dcId);
+            }
+            return new ArrayList<>();
+        }
+
+        @Override
+        public void setSalts(int dcId, List<MTProtoScheme.FutureSalt2> futureSalts) {
+            if (clientManager != null) {
+                clientManager.setSalts(dcId, futureSalts);
+            }
         }
     }
 
@@ -114,8 +158,20 @@ public class WavegramDownloader {
         this.rootPath = rootPath;
     }
 
+    public String getRootPath() {
+        return rootPath;
+    }
+
     public void setDownloadManager(DownloadManager downloadManager) {
         this.downloadManager = downloadManager;
+    }
+
+    public DownloadManager getDownloadManager() {
+        return downloadManager;
+    }
+
+    public DownloadCallback getDownloadCallback() {
+        return downloadCallback;
     }
 
     public void onDownload(DownloadCallback downloadCallback) {
@@ -197,6 +253,10 @@ public class WavegramDownloader {
             downloadFile.fileId = inputDocumentFileLocation.id;
         } else if (inputFileLocation instanceof ApiScheme.InputPhotoFileLocation inputPhotoFileLocation) {
             downloadFile.fileId = inputPhotoFileLocation.id;
+        } else if (inputFileLocation instanceof ApiScheme.InputEncryptedFileLocation inputEncryptedFileLocation) {
+            downloadFile.fileId = inputEncryptedFileLocation.id;
+        } else if (inputFileLocation instanceof ApiScheme.InputPeerPhotoFileLocation inputPeerPhotoFileLocation) {
+            downloadFile.fileId = inputPeerPhotoFileLocation.photoId;
         }
         downloadFile.dcId = dcId;
         downloadFile.inputFileLocation = inputFileLocation;
@@ -221,8 +281,9 @@ public class WavegramDownloader {
 
                 AtomicReference<ApiScheme.NsUpload.FileCdnRedirect> fileCdnRedirect = new AtomicReference<>(null);
                 CountDownLatch countDownLatch = new CountDownLatch(1);
-                MTProtoClient protoClient = new MTProtoClient(wavegramClient.getProtoClient().getDcOptions());
-                protoClient.setClientManager(new DownloadClientManager(downloadFile));
+                MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
+                protoClient.setClientManager(new DownloadClientManager(downloadFile,
+                        wavegramClient.getClientManager()));
                 if (fileCdnRedirect.get() != null) {
                     protoClient.setDcOptions(wavegramClient.getCdnDcs());
                     protoClient.setRsaPublicKeys(wavegramClient.getCdnRsaKeys());
@@ -444,7 +505,7 @@ public class WavegramDownloader {
                                 try {
                                     TLOutputStream outputStream2 = new TLOutputStream();
                                     outputStream2.write(fileCdnRedirect.get().encryptionIv, 0, fileCdnRedirect.get().encryptionIv.length - 4);
-                                    outputStream2.writeLongBE(getCdnFile.offset / 16);
+                                    outputStream2.writeIntBE((int) (getCdnFile.offset / 16));
                                     byte[] bytes = CryptoUtils.AES256CTRDecrypt(cdnFile.bytes, fileCdnRedirect.get().encryptionKey, outputStream2.toByteArray());
                                     if (bytesOffset + expectedLength == bytes.length) {
                                         outputStream.write(bytes, (int) bytesOffset, (int) expectedLength);
@@ -515,9 +576,6 @@ public class WavegramDownloader {
                         downloadCallback.onError(downloadFile.fileId, rpcError2);
                     }
                 }
-                if (!stream) {
-                    outputStream.close();
-                }
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -538,6 +596,10 @@ public class WavegramDownloader {
             downloadFile.fileId = inputDocumentFileLocation.id;
         } else if (inputFileLocation instanceof ApiScheme.InputPhotoFileLocation inputPhotoFileLocation) {
             downloadFile.fileId = inputPhotoFileLocation.id;
+        } else if (inputFileLocation instanceof ApiScheme.InputEncryptedFileLocation inputEncryptedFileLocation) {
+            downloadFile.fileId = inputEncryptedFileLocation.id;
+        } else if (inputFileLocation instanceof ApiScheme.InputPeerPhotoFileLocation inputPeerPhotoFileLocation) {
+            downloadFile.fileId = inputPeerPhotoFileLocation.photoId;
         }
         downloadFile.dcId = dcId;
         downloadFile.filepath = filepath;
@@ -580,8 +642,9 @@ public class WavegramDownloader {
                 List<Future<?>> downloadFutures = new ArrayList<>();
                 for (int i = 0; i < threadCount; i++) {
                     CountDownLatch countDownLatch = new CountDownLatch(1);
-                    MTProtoClient protoClient = new MTProtoClient(wavegramClient.getProtoClient().getDcOptions());
-                    protoClient.setClientManager(new DownloadClientManager(downloadFile));
+                    MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
+                    protoClient.setClientManager(new DownloadClientManager(downloadFile,
+                            wavegramClient.getClientManager()));
                     if (fileCdnRedirect.get() != null) {
                         protoClient.setDcOptions(wavegramClient.getCdnDcs());
                         protoClient.setRsaPublicKeys(wavegramClient.getCdnRsaKeys());
@@ -592,6 +655,7 @@ public class WavegramDownloader {
                     protoClient.setProtoCallback(new ProtoCallback() {
                         @Override
                         public void onStart() {
+                            System.out.println(TAG + ".onStart: called");
                             ApiScheme.InitConnection initConnection = new ApiScheme.InitConnection();
                             initConnection.apiId = wavegramClient.apiId;
                             initConnection.deviceModel = wavegramClient.deviceModel;
@@ -616,6 +680,7 @@ public class WavegramDownloader {
 
                         @Override
                         public void onSessionCreated(MTProtoScheme.NewSessionCreated sessionCreated) {
+                            System.out.println(TAG + ".onSessionCreated: called");
                             countDownLatch.countDown();
                         }
 
@@ -626,7 +691,7 @@ public class WavegramDownloader {
 
                         @Override
                         public void onAuthCreated(AuthKey.Type type) {
-
+                            System.out.println(TAG + ".onAuthCreated: called");
                         }
 
                         @Override
@@ -815,8 +880,10 @@ public class WavegramDownloader {
                                         try {
                                             TLOutputStream outputStream = new TLOutputStream();
                                             outputStream.write(fileCdnRedirect.get().encryptionIv, 0, fileCdnRedirect.get().encryptionIv.length - 4);
-                                            outputStream.writeLongBE(getCdnFile.offset / 16);
-                                            byte[] bytes = CryptoUtils.AES256CTRDecrypt(cdnFile.bytes, fileCdnRedirect.get().encryptionKey, outputStream.toByteArray());
+                                            outputStream.writeIntBE((int) (getCdnFile.offset / 16));
+                                            byte[] bytes = CryptoUtils.AES256CTRDecrypt(cdnFile.bytes,
+                                                    fileCdnRedirect.get().encryptionKey,
+                                                    outputStream.toByteArray());
                                             randomAccessFile.seek((getFile.offset + bytesOffset) - downloadFile.offset);
 
                                             if (bytesOffset + expectedLength == bytes.length) {

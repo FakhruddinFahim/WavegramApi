@@ -1,14 +1,18 @@
 package com.fakhruddin.wavegram;
 
+import com.fakhruddin.mtproto.AuthKey;
+import com.fakhruddin.mtproto.client.ProtoCallback;
 import com.fakhruddin.mtproto.protocol.AbridgedProtocol;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.core.TLObject;
 import com.fakhruddin.wavegram.client.*;
 import com.fakhruddin.wavegram.tl.ApiErrors;
 import com.fakhruddin.wavegram.tl.ApiScheme;
+import com.fakhruddin.wavegram.tl.ApiSecretScheme;
 
 import java.lang.management.ManagementFactory;
 import java.util.Scanner;
+import java.util.concurrent.ExecutionException;
 
 public class ClientMain {
     private static final String TAG = ClientMain.class.getSimpleName();
@@ -28,12 +32,51 @@ public class ClientMain {
         wavegramClient.setDownloadManager(new JsonDownloadManager());
         wavegramClient.setUploadManager(new JsonUploadManager());
         wavegramClient.setProtocol(new AbridgedProtocol());
-//        wavegramClient.setProxy("127.0.0.1",9150, TcpSocket.ProxyType.SOCKS5H);
-        wavegramClient.onMessage(object -> {
-            //All responses from server
-            System.out.println(TAG + ".object: " + object);
-            if (object instanceof MTProtoScheme.RpcResult2 rpcResult && rpcResult.result instanceof MTProtoScheme.RpcError2 rpcError) {
-                System.err.println(TAG + ".object: " + ApiErrors.getDescription(rpcError.errorMessage));
+        wavegramClient.setAcceptSecretChat(true);
+        wavegramClient.setProtoCallback(new ProtoCallback() {
+            @Override
+            public void onStart() {
+                System.out.println(TAG + ".onStart: called");
+            }
+
+            @Override
+            public void onSessionCreated(MTProtoScheme.NewSessionCreated sessionCreated) {
+                System.out.println(TAG + ".onSessionCreated: called");
+            }
+
+            @Override
+            public void onSessionDestroyed(long sessionId) {
+                System.out.println(TAG + ".onSessionDestroyed: " + sessionId);
+            }
+
+            @Override
+            public void onAuthCreated(AuthKey.Type type) {
+                System.out.println(TAG + ".onAuthCreated: called");
+            }
+
+            @Override
+            public void onAuthDestroyed(AuthKey.Type type) {
+                System.out.println(TAG + ".onAuthDestroyed: called");
+            }
+
+            @Override
+            public void onMessage(TLObject object) {
+                //All responses
+                System.out.println(TAG + ".object: " + object);
+                if (object instanceof MTProtoScheme.RpcResult2 rpcResult && rpcResult.result instanceof MTProtoScheme.RpcError2 rpcError) {
+                    System.err.println(TAG + ".object: " + ApiErrors.getDescription(rpcError.errorMessage));
+                }
+            }
+
+            @Override
+            public void onTransportError(int code) {
+                System.out.println(TAG + ".onTransportError: " + code);
+            }
+
+            @Override
+            public void onClose() {
+                System.out.println(TAG + ".onClose: called" +
+                        (wavegramClient.isReconnecting() ? ", reconnecting..." : ""));
             }
         });
 
@@ -41,6 +84,22 @@ public class ClientMain {
             //ApiScheme.Updates responses
         }, ApiScheme.Updates.class);
 
+        wavegramClient.onSecretMessage(new WavegramClient.SecretMessageCallback() {
+            @Override
+            public void onStart(ApiScheme.EncryptedChat encryptedChat) {
+                System.out.println(TAG + ".onStart: SecretMessageCallback "+encryptedChat);
+            }
+
+            @Override
+            public void onMessage(ApiScheme.EncryptedMessage encryptedMessage, ApiSecretScheme.DecryptedMessage decryptedMessage) {
+                System.out.println(TAG + ".onMessage: SecretMessageCallback "+encryptedMessage+" "+decryptedMessage);
+            }
+
+            @Override
+            public void onEnd(long chatId) {
+                System.out.println(TAG + ".onEnd: SecretMessageCallback " + chatId);
+            }
+        });
         wavegramClient.onDownload(new DownloadCallback() {
             @Override
             public void onStart(long fileId, WavegramDownloader.DownloadFile downloadFile) {
@@ -63,7 +122,6 @@ public class ClientMain {
             }
 
         });
-
         wavegramClient.onUpload(new UploadCallback() {
             @Override
             public void onStart(long fileId, WavegramUploader.UploadFile uploadFile) {
@@ -98,25 +156,27 @@ public class ClientMain {
                     while (true) {
                         System.out.print(TAG + ".main: Enter phone code: ");
                         String phoneCode = new Scanner(System.in).nextLine();
-                        TLObject authorization = wavegramClient.signIn(phoneNumber, sentCode.phoneCodeHash, phoneCode,
-                                null);
-                        if (authorization instanceof ApiScheme.NsAuth.Authorization2 authorization2) {
-                            if (authorization2.user instanceof ApiScheme.User2 user) {
-                                System.out.println(TAG + ".main: You are logged in as " + user.firstName + " " + user.lastName + " (" + user.username + ")");
-                            }
-                            break;
-                        } else if (authorization instanceof MTProtoScheme.RpcError2 rpcError) {
-                            System.err.println(TAG + ".main: " + ApiErrors.getDescription(rpcError.errorMessage));
-                            if (rpcError.errorMessage.equals("PHONE_CODE_EMPTY") ||
-                                    rpcError.errorMessage.equals("PHONE_CODE_EXPIRED") ||
-                                    rpcError.errorMessage.equals("PHONE_CODE_INVALID")
-                            ) {
-                                continue;
-                            } else {
+                        try {
+                            TLObject authorization = wavegramClient.signIn(phoneNumber, sentCode.phoneCodeHash, phoneCode).get();
+                            if (authorization instanceof ApiScheme.NsAuth.Authorization2 authorization2) {
+                                if (authorization2.user instanceof ApiScheme.User2 user) {
+                                    System.out.println(TAG + ".main: You are logged in as " + user.firstName + " " + user.lastName + " (" + user.username + ")");
+                                }
                                 break;
+                            } else if (authorization instanceof MTProtoScheme.RpcError2 rpcError) {
+                                System.err.println(TAG + ".main: " + ApiErrors.getDescription(rpcError.errorMessage));
+                                if (rpcError.errorMessage.equals("PHONE_CODE_EMPTY") ||
+                                        rpcError.errorMessage.equals("PHONE_CODE_EXPIRED") ||
+                                        rpcError.errorMessage.equals("PHONE_CODE_INVALID")
+                                ) {
+                                    continue;
+                                } else {
+                                    break;
+                                }
                             }
+                        } catch (InterruptedException | ExecutionException e) {
+                            e.printStackTrace();
                         }
-
                     }
                 } else if (object instanceof MTProtoScheme.RpcError2 rpcError) {
                     System.err.println(TAG + ".main: " + ApiErrors.getDescription(rpcError.errorMessage));
@@ -143,7 +203,7 @@ public class ClientMain {
         /*wavegramClient.executeRpc(new ApiScheme.NsHelp.GetConfig(), new OnMessage() {
             @Override
             public void object(TLObject object) {
-                //Result
+                //MsgsAck, Result
             }
         });*/
 

@@ -2,9 +2,11 @@ package com.fakhruddin.wavegram.client;
 
 import com.fakhruddin.mtproto.AuthKey;
 import com.fakhruddin.mtproto.MTSession;
+import com.fakhruddin.mtproto.client.ClientManager;
 import com.fakhruddin.mtproto.client.MTProtoClient;
 import com.fakhruddin.mtproto.client.ProtoCallback;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
+import com.fakhruddin.mtproto.tl.core.TLInputStream;
 import com.fakhruddin.mtproto.tl.core.TLObject;
 import com.fakhruddin.wavegram.Config;
 import com.fakhruddin.wavegram.tl.ApiScheme;
@@ -24,7 +26,7 @@ import java.util.concurrent.*;
  */
 public class WavegramUploader {
     private static final String TAG = "WavegramUploader";
-    private WavegramClient wavegramClient;
+    private final WavegramClient wavegramClient;
     public static final int MIN_CHUNK_SIZE = 1024;
     public static final int MAX_CHUNK_SIZE = 1024 * 512;
     public static final int MIN_LARGE_FILE_SIZE = 1024 * 1024 * 10;
@@ -32,21 +34,81 @@ public class WavegramUploader {
     int parallelUploadLimit = 2;
     int threadPerUpload = 2;
     private UploadCallback uploadCallback;
-    private List<UploadFile> uploadFiles = new ArrayList<>();
-    private Map<Long, List<MTProtoClient>> protoClients = new HashMap<>();
-    private Map<Long, Future<?>> futures = new HashMap<>();
-    private Map<Long, ExecutorService> uploadExecutorServiceMap = new HashMap<>();
+    private final List<UploadFile> uploadFiles = new ArrayList<>();
+    private final Map<Long, List<MTProtoClient>> protoClients = new HashMap<>();
+    private final Map<Long, Future<?>> futures = new HashMap<>();
+    private final Map<Long, ExecutorService> uploadExecutorServiceMap = new HashMap<>();
     private UploadManager uploadManager;
 
-    private static class UploadClientManager extends JsonClientManager {
+    private static class UploadClientManager extends ClientManager {
+        private int dcId = 0;
+
+        private ClientManager clientManager;
+
+        public UploadClientManager(ClientManager clientManager) {
+            this.clientManager = clientManager;
+        }
+
         @Override
-        public synchronized void setSession(int dcId, MTSession session) {
+        public void setDcId(int dcId) {
+            this.dcId = dcId;
+        }
+
+        @Override
+        public int getDcId() {
+            return this.dcId;
+        }
+
+        @Override
+        public AuthKey getAuthKey(int dcId, AuthKey.Type type) {
+            if (clientManager != null){
+                return clientManager.getAuthKey(dcId, type);
+            }
+            return null;
+        }
+
+        @Override
+        public void setAuthKey(int dcId, AuthKey authKey) {
+            if (clientManager != null){
+                clientManager.setAuthKey(dcId, authKey);
+            }
+        }
+
+        @Override
+        public void deleteAuthKey(int dcId, AuthKey.Type type) {
+            if (clientManager != null){
+                clientManager.deleteAuthKey(dcId, type);
+            }
+        }
+
+        @Override
+        public void setSession(int dcId, MTSession session) {
 
         }
 
         @Override
-        public synchronized MTSession getSession(int dcId) {
+        public MTSession getSession(int dcId) {
             return null;
+        }
+
+        @Override
+        public void deleteSession(int dcId) {
+
+        }
+
+        @Override
+        public List<MTProtoScheme.FutureSalt2> getSalts(int dcId) {
+            if (clientManager != null){
+                return clientManager.getSalts(dcId);
+            }
+            return new ArrayList<>();
+        }
+
+        @Override
+        public void setSalts(int dcId, List<MTProtoScheme.FutureSalt2> futureSalts) {
+            if (clientManager != null){
+                clientManager.setSalts(dcId, futureSalts);
+            }
         }
     }
 
@@ -98,6 +160,14 @@ public class WavegramUploader {
         this.uploadManager = uploadManager;
     }
 
+    public UploadManager getUploadManager() {
+        return uploadManager;
+    }
+
+    public UploadCallback getUploadCallback() {
+        return uploadCallback;
+    }
+
     public void onUpload(UploadCallback uploadCallback) {
         this.uploadCallback = uploadCallback;
     }
@@ -139,16 +209,13 @@ public class WavegramUploader {
                     uploadCallback.onStart(fileId, uploadFile);
                 }
                 int threadCount = 1;
-                if (uploadFile.size > MIN_LARGE_FILE_SIZE) {
-                    threadCount = threadPerUpload;
-                }
                 ExecutorService uploadExecutorService = Executors.newFixedThreadPool(threadCount);
                 List<Future<?>> uploadFutures = new ArrayList<>();
                 uploadExecutorServiceMap.put(uploadFile.fileId, uploadExecutorService);
                 for (int i = 0; i < threadCount; i++) {
                     CountDownLatch countDownLatch = new CountDownLatch(1);
-                    MTProtoClient protoClient = new MTProtoClient(wavegramClient.getProtoClient().getDcOptions());
-                    protoClient.setClientManager(new UploadClientManager());
+                    MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
+                    protoClient.setClientManager(new UploadClientManager(wavegramClient.getClientManager()));
                     protoClient.setRsaPublicKeys(Config.RSA_PUBLIC_KEYS);
                     protoClient.setProtoCallback(new ProtoCallback() {
                         @Override
@@ -213,7 +280,7 @@ public class WavegramUploader {
                             System.out.println(TAG + ".onClose: called");
                         }
                     });
-                    protoClient.setDcId(wavegramClient.getProtoClient().getDcId());
+                    protoClient.setDcId(wavegramClient.getDcId());
                     protoClient.start();
                     List<MTProtoClient> list = new ArrayList<>();
                     list.add(protoClient);
@@ -267,14 +334,14 @@ public class WavegramUploader {
                                 if (uploadFile.size > MIN_LARGE_FILE_SIZE) {
                                     ApiScheme.NsUpload.SaveBigFilePart saveBigFilePart = new ApiScheme.NsUpload.SaveBigFilePart();
                                     saveBigFilePart.fileId = uploadFile.fileId;
-                                    saveBigFilePart.bytes = ByteBuffer.wrap(buffer, 0, read).array();
+                                    saveBigFilePart.bytes = new TLInputStream(buffer).readBytes(read);
                                     saveBigFilePart.filePart = filePart;
                                     saveBigFilePart.fileTotalParts = uploadFile.fileTotalParts;
                                     object = saveBigFilePart;
                                 } else {
                                     ApiScheme.NsUpload.SaveFilePart saveFilePart = new ApiScheme.NsUpload.SaveFilePart();
                                     saveFilePart.fileId = uploadFile.fileId;
-                                    saveFilePart.bytes = ByteBuffer.wrap(buffer, 0, read).array();
+                                    saveFilePart.bytes = new TLInputStream(buffer).readBytes(read);
                                     saveFilePart.filePart = filePart;
                                     object = saveFilePart;
                                 }
@@ -387,8 +454,8 @@ public class WavegramUploader {
                 uploadExecutorServiceMap.put(uploadFile.fileId, uploadExecutorService);
                 for (int i = 0; i < threadCount; i++) {
                     CountDownLatch countDownLatch = new CountDownLatch(1);
-                    MTProtoClient protoClient = new MTProtoClient(wavegramClient.getProtoClient().getDcOptions());
-                    protoClient.setClientManager(new UploadClientManager());
+                    MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
+                    protoClient.setClientManager(new UploadClientManager(wavegramClient.getClientManager()));
                     protoClient.setRsaPublicKeys(Config.RSA_PUBLIC_KEYS);
                     protoClient.setProtoCallback(new ProtoCallback() {
                         @Override
@@ -453,7 +520,7 @@ public class WavegramUploader {
                             System.out.println(TAG + ".onClose: called");
                         }
                     });
-                    protoClient.setDcId(wavegramClient.getProtoClient().getDcId());
+                    protoClient.setDcId(wavegramClient.getDcId());
                     protoClient.start();
                     List<MTProtoClient> list = new ArrayList<>();
                     list.add(protoClient);

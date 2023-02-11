@@ -150,4 +150,67 @@ public class DefaultAESImplementation implements AESImplementation {
         outputStream.close();
         inputStream.close();
     }
+
+    @Override
+    public void AES256IGEEncrypt(InputStream inputStream, OutputStream outputStream, byte[] iv, byte[] key) throws IOException {
+
+        AESFastEngine engine = new AESFastEngine();
+        engine.init(true, new KeyParameter(key));
+
+        byte[] curIvX = CryptoUtils.substring(iv, 16, 16);
+        byte[] curIvY = CryptoUtils.substring(iv, 0, 16);
+
+        byte[] buffer = new byte[16];
+        int count;
+        while ((count = inputStream.read(buffer)) > 0) {
+            byte[] outData = new byte[16];
+            for (int j = 0; j < 16; j++) {
+                outData[j] = (byte) (buffer[j] ^ curIvY[j]);
+            }
+            engine.processBlock(outData, 0, outData, 0);
+            for (int j = 0; j < 16; j++) {
+                outData[j] = (byte) (outData[j] ^ curIvX[j]);
+            }
+
+            curIvX = buffer;
+            curIvY = outData;
+            buffer = new byte[16];
+
+            outputStream.write(outData);
+        }
+        outputStream.flush();
+        outputStream.close();
+        inputStream.close();
+    }
+
+    @Override
+    public void AES256IGEDecrypt(InputStream inputStream, OutputStream outputStream, byte[] iv, byte[] key) throws IOException {
+        AESFastEngine engine = new AESFastEngine();
+        engine.init(false, new KeyParameter(key));
+
+        byte[] curIvX = CryptoUtils.substring(iv, 16, 16);
+        byte[] curIvY = CryptoUtils.substring(iv, 0, 16);
+
+        byte[] buffer = new byte[16];
+        int count;
+        while ((count = inputStream.read(buffer)) > 0) {
+            byte[] outData = new byte[16];
+            for (int j = 0; j < 16; j++) {
+                outData[j] = (byte) (buffer[j] ^ curIvX[j]);
+            }
+            engine.processBlock(outData, 0, outData, 0);
+            for (int j = 0; j < 16; j++) {
+                outData[j] = (byte) (outData[j] ^ curIvY[j]);
+            }
+
+            curIvY = buffer;
+            curIvX = outData;
+            buffer = new byte[16];
+
+            outputStream.write(outData);
+        }
+        outputStream.flush();
+        outputStream.close();
+        inputStream.close();
+    }
 }

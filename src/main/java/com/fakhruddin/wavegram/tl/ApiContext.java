@@ -1,9 +1,9 @@
 package com.fakhruddin.wavegram.tl;
 
 import com.fakhruddin.mtproto.tl.core.TLContext;
-import com.fakhruddin.mtproto.tl.core.TLInputStream;
 import com.fakhruddin.mtproto.tl.core.TLObject;
 import com.fakhruddin.wavegram.tl.ApiScheme.*;
+import com.fakhruddin.wavegram.tl.ApiSecretScheme.*;
 
 /**
  * Created by Fakhruddin Fahim on 22/07/2022
@@ -15,6 +15,175 @@ public class ApiContext extends TLContext {
         TLObject object = getConstructor(id);
         if(object == null){
             object = getMethod(id);
+        }
+        return object;
+    }
+
+    @Override
+    public TLObject getSecretApiObject(int id) {
+        TLObject object = null;
+        if (id == DecryptedMessage8.ID) {
+            object = new DecryptedMessage8();
+        } else if (id == DecryptedMessageService8.ID) {
+            object = new DecryptedMessageService8();
+        } else if (id == DecryptedMessageMediaEmpty8.ID) {
+            object = new DecryptedMessageMediaEmpty8();
+        } else if (id == DecryptedMessageMediaPhoto8.ID) {
+            object = new DecryptedMessageMediaPhoto8();
+        } else if (id == DecryptedMessageMediaVideo8.ID) {
+            object = new DecryptedMessageMediaVideo8();
+        } else if (id == DecryptedMessageMediaGeoPoint8.ID) {
+            object = new DecryptedMessageMediaGeoPoint8();
+        } else if (id == DecryptedMessageMediaContact8.ID) {
+            object = new DecryptedMessageMediaContact8();
+        } else if (id == DecryptedMessageActionSetMessageTTL8.ID) {
+            object = new DecryptedMessageActionSetMessageTTL8();
+        } else if (id == DecryptedMessageMediaDocument8.ID) {
+            object = new DecryptedMessageMediaDocument8();
+        } else if (id == DecryptedMessageMediaAudio8.ID) {
+            object = new DecryptedMessageMediaAudio8();
+        } else if (id == DecryptedMessageActionReadMessages8.ID) {
+            object = new DecryptedMessageActionReadMessages8();
+        } else if (id == DecryptedMessageActionDeleteMessages8.ID) {
+            object = new DecryptedMessageActionDeleteMessages8();
+        } else if (id == DecryptedMessageActionScreenshotMessages8.ID) {
+            object = new DecryptedMessageActionScreenshotMessages8();
+        } else if (id == DecryptedMessageActionFlushHistory8.ID) {
+            object = new DecryptedMessageActionFlushHistory8();
+        } else if (id == DecryptedMessage17.ID) {
+            object = new DecryptedMessage17();
+        } else if (id == DecryptedMessageService17.ID) {
+            object = new DecryptedMessageService17();
+        } else if (id == DecryptedMessageMediaVideo17.ID) {
+            object = new DecryptedMessageMediaVideo17();
+        } else if (id == DecryptedMessageMediaAudio17.ID) {
+            object = new DecryptedMessageMediaAudio17();
+        } else if (id == DecryptedMessageLayer17.ID) {
+            object = new DecryptedMessageLayer17();
+        } else if (id == SendMessageTypingAction17.ID) {
+            object = new SendMessageTypingAction17();
+        } else if (id == SendMessageCancelAction17.ID) {
+            object = new SendMessageCancelAction17();
+        } else if (id == SendMessageRecordVideoAction17.ID) {
+            object = new SendMessageRecordVideoAction17();
+        } else if (id == SendMessageUploadVideoAction17.ID) {
+            object = new SendMessageUploadVideoAction17();
+        } else if (id == SendMessageRecordAudioAction17.ID) {
+            object = new SendMessageRecordAudioAction17();
+        } else if (id == SendMessageUploadAudioAction17.ID) {
+            object = new SendMessageUploadAudioAction17();
+        } else if (id == SendMessageUploadPhotoAction17.ID) {
+            object = new SendMessageUploadPhotoAction17();
+        } else if (id == SendMessageUploadDocumentAction17.ID) {
+            object = new SendMessageUploadDocumentAction17();
+        } else if (id == SendMessageGeoLocationAction17.ID) {
+            object = new SendMessageGeoLocationAction17();
+        } else if (id == SendMessageChooseContactAction17.ID) {
+            object = new SendMessageChooseContactAction17();
+        } else if (id == DecryptedMessageActionResend17.ID) {
+            object = new DecryptedMessageActionResend17();
+        } else if (id == DecryptedMessageActionNotifyLayer17.ID) {
+            object = new DecryptedMessageActionNotifyLayer17();
+        } else if (id == DecryptedMessageActionTyping17.ID) {
+            object = new DecryptedMessageActionTyping17();
+        } else if (id == DecryptedMessageActionRequestKey20.ID) {
+            object = new DecryptedMessageActionRequestKey20();
+        } else if (id == DecryptedMessageActionAcceptKey20.ID) {
+            object = new DecryptedMessageActionAcceptKey20();
+        } else if (id == DecryptedMessageActionAbortKey20.ID) {
+            object = new DecryptedMessageActionAbortKey20();
+        } else if (id == DecryptedMessageActionCommitKey20.ID) {
+            object = new DecryptedMessageActionCommitKey20();
+        } else if (id == DecryptedMessageActionNoop20.ID) {
+            object = new DecryptedMessageActionNoop20();
+        } else if (id == DocumentAttributeImageSize23.ID) {
+            object = new DocumentAttributeImageSize23();
+        } else if (id == DocumentAttributeAnimated23.ID) {
+            object = new DocumentAttributeAnimated23();
+        } else if (id == DocumentAttributeSticker23.ID) {
+            object = new DocumentAttributeSticker23();
+        } else if (id == DocumentAttributeVideo23.ID) {
+            object = new DocumentAttributeVideo23();
+        } else if (id == DocumentAttributeAudio23.ID) {
+            object = new DocumentAttributeAudio23();
+        } else if (id == DocumentAttributeFilename23.ID) {
+            object = new DocumentAttributeFilename23();
+        } else if (id == PhotoSizeEmpty23.ID) {
+            object = new PhotoSizeEmpty23();
+        } else if (id == PhotoSize23.ID) {
+            object = new PhotoSize23();
+        } else if (id == PhotoCachedSize23.ID) {
+            object = new PhotoCachedSize23();
+        } else if (id == FileLocationUnavailable23.ID) {
+            object = new FileLocationUnavailable23();
+        } else if (id == FileLocation23.ID) {
+            object = new FileLocation23();
+        } else if (id == DecryptedMessageMediaExternalDocument23.ID) {
+            object = new DecryptedMessageMediaExternalDocument23();
+        } else if (id == DecryptedMessage45.ID) {
+            object = new DecryptedMessage45();
+        } else if (id == DecryptedMessageMediaPhoto45.ID) {
+            object = new DecryptedMessageMediaPhoto45();
+        } else if (id == DecryptedMessageMediaVideo45.ID) {
+            object = new DecryptedMessageMediaVideo45();
+        } else if (id == DecryptedMessageMediaDocument45.ID) {
+            object = new DecryptedMessageMediaDocument45();
+        } else if (id == DocumentAttributeSticker45.ID) {
+            object = new DocumentAttributeSticker45();
+        } else if (id == DocumentAttributeAudio45.ID) {
+            object = new DocumentAttributeAudio45();
+        } else if (id == MessageEntityUnknown45.ID) {
+            object = new MessageEntityUnknown45();
+        } else if (id == MessageEntityMention45.ID) {
+            object = new MessageEntityMention45();
+        } else if (id == MessageEntityHashtag45.ID) {
+            object = new MessageEntityHashtag45();
+        } else if (id == MessageEntityBotCommand45.ID) {
+            object = new MessageEntityBotCommand45();
+        } else if (id == MessageEntityUrl45.ID) {
+            object = new MessageEntityUrl45();
+        } else if (id == MessageEntityEmail45.ID) {
+            object = new MessageEntityEmail45();
+        } else if (id == MessageEntityBold45.ID) {
+            object = new MessageEntityBold45();
+        } else if (id == MessageEntityItalic45.ID) {
+            object = new MessageEntityItalic45();
+        } else if (id == MessageEntityCode45.ID) {
+            object = new MessageEntityCode45();
+        } else if (id == MessageEntityPre45.ID) {
+            object = new MessageEntityPre45();
+        } else if (id == MessageEntityTextUrl45.ID) {
+            object = new MessageEntityTextUrl45();
+        } else if (id == InputStickerSetShortName45.ID) {
+            object = new InputStickerSetShortName45();
+        } else if (id == InputStickerSetEmpty45.ID) {
+            object = new InputStickerSetEmpty45();
+        } else if (id == DecryptedMessageMediaVenue45.ID) {
+            object = new DecryptedMessageMediaVenue45();
+        } else if (id == DecryptedMessageMediaWebPage45.ID) {
+            object = new DecryptedMessageMediaWebPage45();
+        } else if (id == DocumentAttributeAudio46.ID) {
+            object = new DocumentAttributeAudio46();
+        } else if (id == DocumentAttributeVideo66.ID) {
+            object = new DocumentAttributeVideo66();
+        } else if (id == SendMessageRecordRoundAction66.ID) {
+            object = new SendMessageRecordRoundAction66();
+        } else if (id == SendMessageUploadRoundAction66.ID) {
+            object = new SendMessageUploadRoundAction66();
+        } else if (id == DecryptedMessage73.ID) {
+            object = new DecryptedMessage73();
+        } else if (id == MessageEntityUnderline101.ID) {
+            object = new MessageEntityUnderline101();
+        } else if (id == MessageEntityStrike101.ID) {
+            object = new MessageEntityStrike101();
+        } else if (id == MessageEntityBlockquote101.ID) {
+            object = new MessageEntityBlockquote101();
+        } else if (id == DecryptedMessageMediaDocument143.ID) {
+            object = new DecryptedMessageMediaDocument143();
+        } else if (id == MessageEntitySpoiler144.ID) {
+            object = new MessageEntitySpoiler144();
+        } else if (id == MessageEntityCustomEmoji144.ID) {
+            object = new MessageEntityCustomEmoji144();
         }
         return object;
     }

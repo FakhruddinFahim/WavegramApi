@@ -12,6 +12,13 @@ public class TLOutputStream extends ByteArrayOutputStream {
         this.write((byte) ((value >> 24) & 0xFF));
     }
 
+    public synchronized void writeIntBE(int value) {
+        this.write((byte) ((value >> 24) & 0xFF));
+        this.write((byte) ((value >> 16) & 0xFF));
+        this.write((byte) ((value >> 8) & 0xFF));
+        this.write((byte) (value & 0xFF));
+    }
+
     public synchronized void writeLong(long value) {
         this.write((byte) ((value >> 0) & 0xFF));
         this.write((byte) ((value >> 8) & 0xFF));

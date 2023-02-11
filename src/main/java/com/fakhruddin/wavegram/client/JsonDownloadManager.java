@@ -28,8 +28,9 @@ public class JsonDownloadManager extends DownloadManager {
     @Override
     public void addFile(WavegramDownloader.DownloadFile downloadFile) {
         reentrantLock.lock();
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
+
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
@@ -68,12 +69,8 @@ public class JsonDownloadManager extends DownloadManager {
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
                 fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
 
-        } else {
-            try {
+            } else {
                 JSONObject jsonObject = new JSONObject();
 
                 JSONObject jsonFileInfo = new JSONObject();
@@ -104,29 +101,34 @@ public class JsonDownloadManager extends DownloadManager {
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
                 fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
-            } catch (Exception e) {
-                e.printStackTrace();
+
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
     }
 
     @Override
     public WavegramDownloader.DownloadFile getFile(long fileId) {
-        if (file.exists()) {
-            try {
+        reentrantLock.lock();
+        WavegramDownloader.DownloadFile downloadFile = null;
+        try {
+            if (file.exists()) {
+
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
 
                 if (jsonObject.has(String.valueOf(fileId))) {
                     JSONObject jsonFileInfo = jsonObject.getJSONObject(String.valueOf(fileId));
-                    WavegramDownloader.DownloadFile downloadFile = new WavegramDownloader.DownloadFile();
+                    downloadFile = new WavegramDownloader.DownloadFile();
                     downloadFile.fileId = jsonFileInfo.getLong("fileId");
                     downloadFile.state = jsonFileInfo.getInt("state");
                     downloadFile.dcId = jsonFileInfo.getInt("dcId");
                     downloadFile.size = jsonFileInfo.getLong("size");
-                    if (jsonFileInfo.has("filepath")){
+                    if (jsonFileInfo.has("filepath")) {
                         downloadFile.filepath = jsonFileInfo.getString("filepath");
                     }
                     downloadFile.inputFileLocation = (ApiScheme.InputFileLocation) TLContext.read(new TLInputStream(Base64.getDecoder().decode(jsonFileInfo.getString("inputFileLocation"))));
@@ -138,21 +140,22 @@ public class JsonDownloadManager extends DownloadManager {
                             downloadFile.downloadedParts.put(Integer.valueOf(key), longs);
                         }
                     }
-                    return downloadFile;
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
-
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        return null;
+        return downloadFile;
     }
 
     @Override
     public List<WavegramDownloader.DownloadFile> getFiles() {
         List<WavegramDownloader.DownloadFile> downloadFiles = new ArrayList<>();
-        if (file.exists()) {
-            try {
+        reentrantLock.unlock();
+        try {
+            if (file.exists()) {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
@@ -163,7 +166,7 @@ public class JsonDownloadManager extends DownloadManager {
                     downloadFile.state = jsonFileInfo.getInt("state");
                     downloadFile.dcId = jsonFileInfo.getInt("dcId");
                     downloadFile.size = jsonFileInfo.getLong("size");
-                    if (jsonFileInfo.has("filepath")){
+                    if (jsonFileInfo.has("filepath")) {
                         downloadFile.filepath = jsonFileInfo.getString("filepath");
                     }
                     downloadFile.inputFileLocation = (ApiScheme.InputFileLocation) ApiContext.read(new TLInputStream(Base64.getDecoder().decode(jsonFileInfo.getString("inputFileLocation"))));
@@ -176,9 +179,11 @@ public class JsonDownloadManager extends DownloadManager {
                     }
                     downloadFiles.add(downloadFile);
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
         return downloadFiles;
     }
@@ -186,8 +191,8 @@ public class JsonDownloadManager extends DownloadManager {
     @Override
     public void remove(long fileId) {
         reentrantLock.lock();
-        if (file.exists()) {
-            try {
+        try {
+            if (file.exists()) {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
@@ -195,10 +200,11 @@ public class JsonDownloadManager extends DownloadManager {
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
                 fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
-            } catch (IOException e) {
-                e.printStackTrace();
             }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            reentrantLock.unlock();
         }
-        reentrantLock.unlock();
     }
 }

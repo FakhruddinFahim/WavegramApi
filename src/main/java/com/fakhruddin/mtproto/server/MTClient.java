@@ -172,7 +172,7 @@ public class MTClient {
                         long authKeyId = tlInputStream.readLong();
                         tlInputStream.position(0);
                         MTMessage mtMessage = new MTMessage();
-                        mtMessage.setClient(false);
+                        mtMessage.setX(8);
                         if (authKeyId != 0) {
                             if (serverManager != null) {
                                 authKey = serverManager.getAuthKey(authKeyId);
@@ -476,18 +476,21 @@ public class MTClient {
                     try {
                         processReqPQMulti(reqPqMulti);
                     } catch (Exception e) {
+                        e.printStackTrace();
                         close();
                     }
                 } else if (object instanceof MTProtoScheme.ReqDHParams reqDHParams) {
                     try {
                         processReqDHParams(reqDHParams);
                     } catch (Exception e) {
+                        e.printStackTrace();
                         close();
                     }
                 } else if (object instanceof MTProtoScheme.SetClientDHParams clientDHParams) {
                     try {
                         processClientDHParams(clientDHParams);
                     } catch (Exception e) {
+                        e.printStackTrace();
                         close();
                     }
                 }
@@ -1126,13 +1129,13 @@ public class MTClient {
         } else {
             message.setMessageId(session.generateMessageId(false));
         }
-        message.setMTProtoVersion(mtProtoVersion);
         message.setMessageData(object);
         write(message);
     }
 
     public void write(MTMessage message) throws IOException {
-        message.setClient(false);
+        message.setMTProtoVersion(mtProtoVersion);
+        message.setX(8);
         sentMessages.put(message.getMessageId(), message);
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         TLOutputStream byteArrayOutputStream1 = new TLOutputStream();
@@ -1187,7 +1190,7 @@ public class MTClient {
         }
         MTMessage message = new MTMessage(authKey);
         message.setMTProtoVersion(mtProtoVersion);
-        message.setClient(false);
+        message.setX(0);
         message.read(tlInputStream);
         return message;
     }

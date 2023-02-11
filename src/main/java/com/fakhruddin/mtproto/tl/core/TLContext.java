@@ -33,7 +33,10 @@ public abstract class TLContext {
         TLObject object = getProtoObject(id);
         if (object == null) {
             object = getApiObject(id);
-        }else if (object instanceof MTProtoScheme.GzipPacked gzipPacked){
+            if (object == null) {
+                object = getSecretApiObject(id);
+            }
+        } else if (object instanceof MTProtoScheme.GzipPacked gzipPacked) {
             gzipPacked.read(inputStream);
             ByteArrayInputStream packedDataStream = new ByteArrayInputStream(gzipPacked.packedData);
             return readObject(new GZIPInputStream(packedDataStream).readAllBytes());
@@ -152,4 +155,6 @@ public abstract class TLContext {
 
 
     public abstract TLObject getApiObject(int id);
+
+    public abstract TLObject getSecretApiObject(int id);
 }
