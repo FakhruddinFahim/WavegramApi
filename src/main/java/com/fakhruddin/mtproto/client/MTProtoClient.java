@@ -205,9 +205,11 @@ public class MTProtoClient extends TcpSocket {
     }
 
     public void switchDc(int dcId) {
-        close();
         this.dcId = dcId;
-        start();
+        if (isConnected){
+            close();
+            start();
+        }
     }
 
     public void start() {

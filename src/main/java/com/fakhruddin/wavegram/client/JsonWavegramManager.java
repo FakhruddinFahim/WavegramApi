@@ -43,7 +43,7 @@ public class JsonWavegramManager extends WavegramManager {
                 jsonObject.put("userId", userId);
                 jsonObject.put("isUser", isUser);
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
-                fileOutputStream.write(jsonObject.toString().getBytes());
+                fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -133,7 +133,7 @@ public class JsonWavegramManager extends WavegramManager {
                     jsonObject.put("loggedInDcs", jsonArray);
                 }
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
-                fileOutputStream.write(jsonObject.toString().getBytes());
+                fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -145,7 +145,7 @@ public class JsonWavegramManager extends WavegramManager {
             jsonObject.put("loggedInDcs", jsonArray);
             try {
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
-                fileOutputStream.write(jsonObject.toString().getBytes());
+                fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -171,7 +171,7 @@ public class JsonWavegramManager extends WavegramManager {
                     }
                 }
                 FileOutputStream fileOutputStream = new FileOutputStream(file);
-                fileOutputStream.write(jsonObject.toString().getBytes());
+                fileOutputStream.write(jsonObject.toString(2).getBytes());
                 fileOutputStream.close();
             } catch (IOException e) {
                 e.printStackTrace();

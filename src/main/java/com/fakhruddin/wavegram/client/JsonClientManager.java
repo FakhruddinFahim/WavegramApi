@@ -85,7 +85,7 @@ public class JsonClientManager extends ClientManager {
                 FileInputStream fileInputStream = new FileInputStream(file);
                 JSONObject jsonObject = new JSONObject(new String(fileInputStream.readAllBytes()));
                 fileInputStream.close();
-                if (jsonObject.has(String.valueOf(getDcId()))) {
+                if (jsonObject.has(String.valueOf(dcId))) {
                     JSONObject dcJsonObject = jsonObject.getJSONObject(String.valueOf(dcId));
                     authKey = new AuthKey();
                     if (type == AuthKey.Type.PERM_AUTH_KEY && dcJsonObject.has("authKey")) {

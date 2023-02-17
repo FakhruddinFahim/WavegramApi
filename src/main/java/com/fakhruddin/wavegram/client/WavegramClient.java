@@ -141,16 +141,35 @@ public class WavegramClient extends MTProtoClient {
     }
 
     public Future<TLObject> exportAuth(int dcId) {
-        if (wavegramManager != null && wavegramManager.getUserId() != -1 && getDcId() != dcId) {
-            int[] loggedInDcs = wavegramManager.getLoggedInDcs();
-            if (loggedInDcs != null && Arrays.stream(loggedInDcs).allMatch(i -> i != dcId)) {
-                ApiScheme.NsAuth.ExportAuthorization exportAuthorization = new ApiScheme.NsAuth.ExportAuthorization();
-                exportAuthorization.dcId = dcId;
-                return executeRpc(exportAuthorization, null, 1000 * 60,
-                        true, true);
+        CompletableFuture<TLObject> future = new CompletableFuture<>();
+        MTProtoScheme.RpcError2 rpcError = new MTProtoScheme.RpcError2();
+        rpcError.errorCode = -1;
+        if (wavegramManager != null && wavegramManager.getUserId() != -1) {
+            if (wavegramManager.getDcId() != dcId) {
+                int[] loggedInDcs = wavegramManager.getLoggedInDcs();
+                if (loggedInDcs != null) {
+                    if (Arrays.stream(loggedInDcs).allMatch(i -> i != dcId)) {
+                        ApiScheme.NsAuth.ExportAuthorization exportAuthorization = new ApiScheme.NsAuth.ExportAuthorization();
+                        exportAuthorization.dcId = dcId;
+                        return executeRpc(exportAuthorization, null, 1000 * 60,
+                                true, true);
+                    } else {
+                        rpcError.errorMessage = "LOGGED_IN_THIS_DC";
+                        future.complete(rpcError);
+                    }
+                } else {
+                    rpcError.errorMessage = "USER_NOT_LOGGED_IN";
+                    future.complete(rpcError);
+                }
+            } else {
+                rpcError.errorMessage = "SAME_DC";
+                future.complete(rpcError);
             }
+        } else {
+            rpcError.errorMessage = "USER_NOT_LOGGED_IN";
+            future.complete(rpcError);
         }
-        return null;
+        return future;
     }
 
     public WavegramManager getWavegramManager() {
@@ -1660,7 +1679,7 @@ public class WavegramClient extends MTProtoClient {
                 e.printStackTrace();
             }
         }
-        if (cdnConfig != null){
+        if (cdnConfig != null) {
             for (ApiScheme.CdnPublicKey cdnPublicKey : cdnConfig.publicKeys) {
                 if (cdnPublicKey instanceof ApiScheme.CdnPublicKey2 cdnPublicKey2) {
                     rsaKeys.add(new RsaKey(cdnPublicKey2.publicKey));
