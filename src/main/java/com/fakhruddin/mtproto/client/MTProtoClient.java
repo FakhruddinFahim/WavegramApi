@@ -206,7 +206,7 @@ public class MTProtoClient extends TcpSocket {
 
     public void switchDc(int dcId) {
         this.dcId = dcId;
-        if (isConnected){
+        if (isConnected) {
             close();
             start();
         }
@@ -1064,38 +1064,13 @@ public class MTProtoClient extends TcpSocket {
             ackedMsgs.remove(0);
         }
 
-        List<Long> remove = new ArrayList<>();
-
-        int i = 0;
-        if ((i = sentMessages.size()) > SENT_MSG_CACHE_LIMIT) {
-            for (Long key : sentMessages.keySet()) {
-                remove.add(key);
-                i--;
-                if (i <= SENT_MSG_CACHE_LIMIT) {
-                    break;
-                }
-            }
+        while (sentMessages.size() > SENT_MSG_CACHE_LIMIT) {
+            sentMessages.remove(sentMessages.keySet().stream().findFirst().get());
         }
 
-        for (Long key : remove) {
-            sentMessages.remove(key);
+        while (recvMessages.size() > RECV_MSG_CACHE_LIMIT) {
+            recvMessages.remove(recvMessages.keySet().stream().findFirst().get());
         }
-        remove.clear();
-
-        if ((i = recvMessages.size()) > RECV_MSG_CACHE_LIMIT) {
-            for (Long key : recvMessages.keySet()) {
-                remove.add(key);
-                i--;
-                if (i <= RECV_MSG_CACHE_LIMIT) {
-                    break;
-                }
-            }
-        }
-
-        for (Long key : remove) {
-            recvMessages.remove(key);
-        }
-        remove.clear();
     }
 
     private void sendAck(long msgId) {
