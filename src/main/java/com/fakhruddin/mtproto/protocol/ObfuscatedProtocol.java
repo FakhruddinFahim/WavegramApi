@@ -7,7 +7,6 @@ import com.fakhruddin.mtproto.utils.CryptoUtils;
 
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.ShortBufferException;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -25,7 +24,7 @@ public class ObfuscatedProtocol extends Protocol {
     private AesCTR decryptor;
 
     public ObfuscatedProtocol(Protocol protocol) {
-        if (protocol instanceof ObfuscatedProtocol){
+        if (protocol instanceof ObfuscatedProtocol) {
             throw new IllegalArgumentException();
         }
         this.protocol = protocol;
@@ -36,7 +35,7 @@ public class ObfuscatedProtocol extends Protocol {
     }
 
     public void setProtocol(Protocol protocol) {
-        if (protocol instanceof ObfuscatedProtocol){
+        if (protocol instanceof ObfuscatedProtocol) {
             throw new IllegalArgumentException();
         }
         this.protocol = protocol;
@@ -171,12 +170,17 @@ public class ObfuscatedProtocol extends Protocol {
 
     @Override
     public byte[] readMsg(InputStream inputStream) throws IOException {
-        try {
-            byte[] bytes = decryptor.encrypt(inputStream.readAllBytes());
-            return this.protocol.readMsg(new ByteArrayInputStream(bytes));
-        } catch (ShortBufferException e) {
-            throw new RuntimeException(e);
+        class DecryptedInputStream extends InputStream{
+            @Override
+            public int read() throws IOException {
+                try {
+                    return decryptor.encrypt(inputStream.readNBytes(1))[0] & 0xFF;
+                } catch (ShortBufferException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
+        return protocol.readMsg(new DecryptedInputStream());
     }
 
     @Override

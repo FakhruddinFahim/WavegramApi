@@ -26,12 +26,12 @@ public class AbridgedProtocol extends Protocol {
 
     @Override
     public byte[] readMsg(InputStream inputStream) throws IOException {
-        int headerLen = readBytes(1, inputStream)[0];
+        int headerLen = inputStream.read();
         if (headerLen == 0x7F) {
             headerLen = inputStream.read() + (inputStream.read() << 8) + (inputStream.read() << 16);
         }
         int len = headerLen * 4;
-        return readBytes(len, inputStream);
+        return inputStream.readNBytes(len);
     }
 
     @Override
