@@ -13,7 +13,22 @@ import java.util.Arrays;
  * Created by Fakhruddin Fahim on 07/10/2022
  */
 public class WebSocketProtocol extends Protocol {
-    private Protocol protocol = new ObfuscatedProtocol();
+    public enum Opcode {
+        CONTINUE(0),
+        TEXT(1),
+        BINARY(2),
+        CLOSE(8),
+        PING(9),
+        PONG(10);
+
+        public final int value;
+
+        Opcode(int value) {
+            this.value = value;
+        }
+    }
+
+    private Protocol protocol = new ObfuscatedProtocol(new AbridgedProtocol());
     public boolean isClient = true;
 
     public WebSocketProtocol() {
@@ -72,11 +87,17 @@ public class WebSocketProtocol extends Protocol {
     }
 
     private byte[] readWebSocketMessage(InputStream inputStream) throws IOException {
-        byte first = readBytes(1, inputStream)[0];
+        int first = inputStream.read();
+        if (first == -1) {
+            throw new IOException("stream close");
+        }
         int fin = (first >> 7) & 1;
-        int type = first & 0x0F;
+        int rsv1 = (first >> 6) & 1;
+        int rsv2 = (first >> 5) & 1;
+        int rsv3 = (first >> 4) & 1;
+        int opcode = first & 0x0F;
 
-        byte payloadLength = readBytes(1, inputStream)[0];
+        byte payloadLength = (byte) inputStream.read();
 
         boolean isMasked = (payloadLength & 128) == 128;
         long length = (payloadLength & 127);
@@ -85,49 +106,50 @@ public class WebSocketProtocol extends Protocol {
         if ((payloadLength & 127) <= 125) {
             length = (payloadLength & 127);
         } else if ((payloadLength & 127) == 126) {
-            byte[] len = readBytes(2, inputStream);
-            length = ((len[0] << 8) + (len[1] & 0xFF)) & 0xFFFF;
+            length = ((inputStream.read() << 8) + (inputStream.read() & 0xFF)) & 0xFFFF;
         } else {
-            byte[] len = readBytes(8, inputStream);
-            long a = len[0];
-            long b = len[1];
-            long c = len[2];
-            long d = len[3];
-            long aa = (a << 24) + (b << 16) + (c << 8) + d;
-            long e = len[4];
-            long f = len[5];
-            long g = len[6];
-            long h = len[7];
-            long bb = (e << 24) + (f << 16) + (g << 8) + h;
-            length = (aa << 32) + bb;
+            length = ((long) inputStream.read() << 56) +
+                    ((long) inputStream.read() << 48) +
+                    ((long) inputStream.read() << 40) +
+                    ((long) inputStream.read() << 32) +
+                    ((long) inputStream.read() << 24) +
+                    (inputStream.read() << 16) +
+                    (inputStream.read() << 8) +
+                    (inputStream.read());
         }
         byte[] masked = null;
         if (isMasked) {
             masked = readBytes(4, inputStream);
         }
-        buffer = readBytes((int) length, inputStream);
+        buffer = inputStream.readNBytes((int) length);
         if (isMasked) {
             for (int i = 0; i < buffer.length; i++) {
                 buffer[i] = (byte) (buffer[i] ^ masked[i % 4]);
             }
         }
 
-        if (type > 2 && type <= 7) {
-            return readMsg(inputStream);
-        } else if (type == 9) {
-            return readMsg(inputStream);
-        } else if (type > 10) {
-            return readMsg(inputStream);
-        } else if (type == 8) {
-            inputStream.close();
-            throw new IllegalStateException();
-        }
-        if (fin == 0){
-            byte[] bytes = readMsg(inputStream);
-            TLOutputStream outputStream = new TLOutputStream();
-            outputStream.write(buffer);
-            outputStream.write(bytes);
-            buffer = outputStream.toByteArray();
+        if (opcode == 0 || opcode == 1 || opcode == 2) {
+            if (fin == 0) {
+                byte[] newBuffer = readWebSocketMessage(inputStream);
+                TLOutputStream outputStream = new TLOutputStream();
+                outputStream.writeBytes(buffer);
+                outputStream.writeBytes(newBuffer);
+                buffer = outputStream.toByteArray();
+            }
+        } else if (opcode == 8) {
+            String err = "ws close: no close buffer";
+            if (length >= 2) {
+                int statusCode = (buffer[0] << 8) + buffer[1];
+                String reason = new String(buffer, 2, buffer.length);
+                err = "ws close status: " + statusCode + " reason: " + reason;
+            }
+            throw new IOException(err);
+        } else if (opcode == 9) { // ping
+            return readWebSocketMessage(inputStream);
+        } else if (opcode == 10) { //pong
+            return readWebSocketMessage(inputStream);
+        } else {
+            throw new IOException("ws unknown opcode " + opcode);
         }
         return buffer;
     }
@@ -140,34 +162,41 @@ public class WebSocketProtocol extends Protocol {
         writeWebSocketMessage(outputStream, buffer);
     }
 
-    private void writeWebSocketMessage(OutputStream outputStream, byte[] buffer) throws IOException {
-        byte first = (byte) 0b10000010;
+    void writeWebSocketMessage(OutputStream outputStream, byte[] data) throws IOException {
+        sendFrame(outputStream, Opcode.BINARY, data);
+    }
+
+    private void sendFrame(OutputStream outputStream, Opcode opcode, byte[] data) throws IOException {
+        int first = (0x80 | opcode.value);
         outputStream.write(first);
-        byte b = (byte) 0x80;
-        if (buffer.length > 0xFFFF) {
-            outputStream.write((byte) (isClient ? b | 0x7F : 0x7F));
-            outputStream.write((byte) 0x00);
-            outputStream.write((byte) 0x00);
-            outputStream.write((byte) 0x00);
-            outputStream.write((byte) 0x00);
-            outputStream.write((byte) ((buffer.length >> 24) & 0xFF));
-            outputStream.write((byte) ((buffer.length >> 16) & 0xFF));
-            outputStream.write((byte) ((buffer.length >> 8) & 0xFF));
-            outputStream.write((byte) (buffer.length & 0xFF));
-        } else if (buffer.length >= 0x7E) {
-            outputStream.write((byte) (isClient ? b | 0x7E : 0x7E));
-            outputStream.write((byte) (buffer.length >> 8));
-            outputStream.write((byte) (buffer.length & 0xFF));
+        if (data.length <= 125) {
+            // Use 1-byte payload length
+            outputStream.write(isClient ? (data.length | 0x80) : data.length);
+        } else if (data.length <= 65535) {
+            // Use 2-byte payload length
+            outputStream.write(isClient ? (0x7E | 0x80) : 0x7E); // Extended payload length indicator
+            outputStream.write(data.length >> 8);
+            outputStream.write(data.length);
         } else {
-            outputStream.write((byte) (isClient ? (b | buffer.length) : buffer.length));
+            // Frame size too large (> 65535)
+            outputStream.write(isClient ? (0x7F | 0x80) : 0x7F); // Extended payload length indicator
+            outputStream.write((data.length >> 56) & 0xFF);
+            outputStream.write((data.length >> 48) & 0xFF);
+            outputStream.write((data.length >> 40) & 0xFF);
+            outputStream.write((data.length >> 32) & 0xFF);
+            outputStream.write((data.length >> 24) & 0xFF);
+            outputStream.write((data.length >> 16) & 0xFF);
+            outputStream.write((data.length >> 8) & 0xFF);
+            outputStream.write(data.length & 0xFF);
         }
+
         if (isClient) {
             byte[] mask = CryptoUtils.randomBytes(4);
             outputStream.write(mask);
-            for (int i = 0; i < buffer.length; i++) {
-                buffer[i] ^= mask[i % 4];
+            for (int i = 0; i < data.length; i++) {
+                data[i] ^= mask[i % 4];
             }
         }
-        outputStream.write(buffer);
+        outputStream.write(data);
     }
 }
