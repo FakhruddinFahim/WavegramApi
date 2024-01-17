@@ -69,7 +69,7 @@ public class MTProtoClient extends TcpSocket {
     private int dcId = -1;
     private boolean useIpv6 = false;
 
-    private static class RpcCallback {
+    public static class RpcCallback {
         public long msgId = 0;
         public OnMessage callback = null;
         public ScheduledFuture<?> scheduledFuture;
@@ -422,6 +422,7 @@ public class MTProtoClient extends TcpSocket {
                 onTransportError(transportException.getErrorCode());
                 break;
             } catch (Exception e) {
+                e.printStackTrace();
                 reconnect();
                 break;
             }
@@ -1003,12 +1004,20 @@ public class MTProtoClient extends TcpSocket {
                         TimeUnit.SECONDS);
                 tempAuthScheduleFuture = scheduleExecutorService.schedule(this::createTempAuthKey, tempAuthKeyExpire - 60, TimeUnit.SECONDS);
 
-                if (protoCallback != null) {
-                    executorService.execute(() -> {
+
+                executorService.execute(() -> {
+                    if (protoCallback != null) {
                         protoCallback.onAuthCreated(AuthKey.Type.TEMP_AUTH_KEY);
-                        protoCallback.onStart();
-                    });
-                }
+                    }
+                    try {
+                        bindTempAuthKey();
+                        if (protoCallback != null) {
+                            protoCallback.onStart();
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                });
             } else {
                 authKey = new AuthKey(calculatedAuthKey);
                 authKey.setType(AuthKey.Type.PERM_AUTH_KEY);
@@ -1245,17 +1254,8 @@ public class MTProtoClient extends TcpSocket {
         return rpcCallback.future;
     }
 
+    protected void bindTempAuthKey() throws Exception {
 
-    public Future<TLObject> bindTempAuthKey(MTMessage message) {
-        RpcCallback rpcCallback = new RpcCallback();
-        rpcCallback.msgId = message.getMessageId();
-        rpcCallbacks.put(message.getMessageId(), rpcCallback);
-        try {
-            write(message);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return rpcCallback.future;
     }
 
     public void write(MTMessage message) throws Exception {

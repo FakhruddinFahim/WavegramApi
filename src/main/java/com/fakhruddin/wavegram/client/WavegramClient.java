@@ -220,48 +220,6 @@ public class WavegramClient extends MTProtoClient {
 
             @Override
             public void onAuthCreated(AuthKey.Type type) {
-                if (type == AuthKey.Type.TEMP_AUTH_KEY) {
-                    MTProtoScheme.BindAuthKeyInner2 bindAuthKeyInner2 = new MTProtoScheme.BindAuthKeyInner2();
-                    bindAuthKeyInner2.nonce = CryptoUtils.randomLong();
-                    bindAuthKeyInner2.tempAuthKeyId = getTempAuthKey().getAuthKeyId();
-                    bindAuthKeyInner2.permAuthKeyId = getAuthKey().getAuthKeyId();
-                    bindAuthKeyInner2.tempSessionId = getSession().getSessionId();
-                    bindAuthKeyInner2.expiresAt = (int) ((getSession().getServerTime() / 1000) + getTempAuthKeyExpire());
-
-                    MTMessage mtMessage2 = new MTMessage(getTempAuthKey());
-                    mtMessage2.setMessageId(getSession().generateMessageId());
-                    mtMessage2.setSessionId(getSession().getSessionId());
-                    mtMessage2.setSalt(getSession().getCurrentSalt().salt);
-                    mtMessage2.setSeqNo(getSession().generateSeqNo(true));
-
-                    ApiScheme.NsAuth.BindTempAuthKey bindTempAuthKey = new ApiScheme.NsAuth.BindTempAuthKey();
-                    bindTempAuthKey.permAuthKeyId = bindAuthKeyInner2.permAuthKeyId;
-                    bindTempAuthKey.nonce = bindAuthKeyInner2.nonce;
-                    bindTempAuthKey.expiresAt = bindAuthKeyInner2.expiresAt;
-
-                    MTMessage mtMessage = new MTMessage(getAuthKey());
-                    mtMessage.setMessageId(mtMessage2.getMessageId());
-                    mtMessage.setSessionId(CryptoUtils.randomLong());
-                    mtMessage.setSalt(CryptoUtils.randomLong());
-                    mtMessage.setSeqNo(0);
-                    mtMessage.setMessageData(bindAuthKeyInner2);
-                    mtMessage.setMTProtoVersion(MTProtoVersion.MTPROTO_1_0);
-
-                    try {
-                        TLOutputStream tlOutputStream = new TLOutputStream();
-                        mtMessage.write(tlOutputStream);
-                        bindTempAuthKey.encryptedMessage = tlOutputStream.toByteArray();
-
-                        mtMessage2.setMessageData(bindTempAuthKey);
-
-                        Future<TLObject> future = bindTempAuthKey(mtMessage2);
-                        if (future.get() instanceof ApiScheme.BoolFalse) {
-                            throw new IllegalStateException("bindTempAuthKey failed");
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
                 if (protoCallback != null) {
                     protoCallback.onAuthCreated(type);
                 }
@@ -333,6 +291,50 @@ public class WavegramClient extends MTProtoClient {
             }
         });
         super.start();
+    }
+
+    @Override
+    protected void bindTempAuthKey() throws Exception {
+        MTProtoScheme.BindAuthKeyInner2 bindAuthKeyInner2 = new MTProtoScheme.BindAuthKeyInner2();
+        bindAuthKeyInner2.nonce = CryptoUtils.randomLong();
+        bindAuthKeyInner2.tempAuthKeyId = getTempAuthKey().getAuthKeyId();
+        bindAuthKeyInner2.permAuthKeyId = getAuthKey().getAuthKeyId();
+        bindAuthKeyInner2.tempSessionId = getSession().getSessionId();
+        bindAuthKeyInner2.expiresAt = (int) ((getSession().getServerTime() / 1000) + getTempAuthKeyExpire());
+
+        MTMessage message = new MTMessage(getTempAuthKey());
+        message.setMessageId(getSession().generateMessageId());
+        message.setSessionId(getSession().getSessionId());
+        message.setSalt(getSession().getCurrentSalt().salt);
+        message.setSeqNo(getSession().generateSeqNo(true));
+
+        ApiScheme.NsAuth.BindTempAuthKey bindTempAuthKey = new ApiScheme.NsAuth.BindTempAuthKey();
+        bindTempAuthKey.permAuthKeyId = bindAuthKeyInner2.permAuthKeyId;
+        bindTempAuthKey.nonce = bindAuthKeyInner2.nonce;
+        bindTempAuthKey.expiresAt = bindAuthKeyInner2.expiresAt;
+
+        MTMessage encryptedMessage = new MTMessage(getAuthKey());
+        encryptedMessage.setMessageId(message.getMessageId());
+        encryptedMessage.setSessionId(CryptoUtils.randomLong());
+        encryptedMessage.setSalt(CryptoUtils.randomLong());
+        encryptedMessage.setSeqNo(0);
+        encryptedMessage.setMessageData(bindAuthKeyInner2);
+        encryptedMessage.setMTProtoVersion(MTProtoVersion.MTPROTO_1_0);
+
+        TLOutputStream tlOutputStream = new TLOutputStream();
+        encryptedMessage.write(tlOutputStream);
+        bindTempAuthKey.encryptedMessage = tlOutputStream.toByteArray();
+        message.setMessageData(bindTempAuthKey);
+
+        RpcCallback rpcCallback = new RpcCallback();
+        rpcCallback.msgId = message.getMessageId();
+        rpcCallbacks.put(message.getMessageId(), rpcCallback);
+
+        write(message);
+
+        if (rpcCallback.future.get() instanceof ApiScheme.BoolFalse) {
+            throw new IllegalStateException("bindTempAuthKey failed");
+        }
     }
 
     public boolean isLoggedIn() {
