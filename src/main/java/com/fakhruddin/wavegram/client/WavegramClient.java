@@ -332,7 +332,7 @@ public class WavegramClient extends MTProtoClient {
 
         write(message);
 
-        if (rpcCallback.future.get() instanceof ApiScheme.BoolFalse) {
+        if (rpcCallback.future.get().getId() != ApiScheme.BoolTrue.ID) {
             throw new IllegalStateException("bindTempAuthKey failed");
         }
     }
