@@ -1,1 +1,8 @@
 rootProject.name = 'WavegramApi'
+
+include 'mtproto:common'
+include 'mtproto:client'
+include 'mtproto:server'
+include 'wavegram:common'
+include 'wavegram:client'
+include 'wavegram:server'

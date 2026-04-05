@@ -1,0 +1,29 @@
+plugins {
+  id "java-library"
+}
+
+dependencies {
+}
+
+subprojects {
+  apply plugin: "java-library"
+
+  dependencies {
+    api "org.json:json:20250107"
+    implementation "org.bouncycastle:bcpkix-jdk15on:1.70"
+  }
+
+  jar {
+    manifest {
+      attributes(
+        'Main-Class': 'com.fakhruddin.mtproto.Main'
+      )
+    }
+    from {
+      configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    } {
+      exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+  }
+}

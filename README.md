@@ -2,7 +2,7 @@
 
 Telegram client and server implementation
 
-## [Config.java](src/main/java/com/fakhruddin/wavegram/Config.java)
+## [Config.java](src-old/main/java/com/fakhruddin/wavegram/Config.java)
 
 Setup your config
 
@@ -23,17 +23,17 @@ public class Config {
 
 ## Client Example
  
-[ClientMain.java](src/main/java/com/fakhruddin/wavegram/ClientMain.java)
+[ClientMain.java](src-old/main/java/com/fakhruddin/wavegram/ClientMain.java)
 
 ## Server Example
 
 You have to write all content-related method responses
-implementing [MessageHandler.java](src/main/java/com/fakhruddin/wavegram/server/MessageHandler.java). Default
+implementing [MessageHandler.java](src-old/main/java/com/fakhruddin/wavegram/server/MessageHandler.java). Default
 implementation
-is [WavegramMessageHandler.java](src/main/java/com/fakhruddin/wavegram/server/WavegramMessageHandler.java) (I don't
+is [WavegramMessageHandler.java](src-old/main/java/com/fakhruddin/wavegram/server/WavegramMessageHandler.java) (I don't
 know If I will implement all methods).
 
-[ServerMain.java](src/main/java/com/fakhruddin/wavegram/ServerMain.java)
+[ServerMain.java](src-old/main/java/com/fakhruddin/wavegram/ServerMain.java)
 
 ## Resources
 
