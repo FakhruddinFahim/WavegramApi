@@ -2,38 +2,38 @@
 
 Telegram client and server implementation
 
-## [Config.java](src-old/main/java/com/fakhruddin/wavegram/Config.java)
+## [Config.java](wavegram/client/src/main/java/com/fakhruddin/wavegram/Config.java)
 
 Setup your config
 
 ```java
 public class Config {
-    //For client obtain API_ID and API_HASH from https://my.telegram.org
-    public static final int API_ID = 0;
-    public static final String API_HASH = "";
-    public static final String APP_VERSION = "1.0";
-    //For server set up a mysql server (e.g. wamp, xampp) and
-    //replace MYSQL_USERNAME and MYSQL_PASSWORD with your details
-    public static final int SERVER_PORT = 443;
-    public static final String MYSQL_USERNAME = "root";
-    public static final String MYSQL_PASSWORD = "12345678";
-    public static final String MYSQL_DBNAME = "wavegram";
+  //For client obtain API_ID and API_HASH from https://my.telegram.org
+  public static final int API_ID = 0;
+  public static final String API_HASH = "";
+  public static final String APP_VERSION = "1.0";
+  //For server set up a mysql server (e.g. wamp, xampp) and
+  //replace MYSQL_USERNAME and MYSQL_PASSWORD with your details
+  public static final int SERVER_PORT = 443;
+  public static final String MYSQL_USERNAME = "root";
+  public static final String MYSQL_PASSWORD = "12345678";
+  public static final String MYSQL_DBNAME = "wavegram";
 }
 ```
 
 ## Client Example
  
-[ClientMain.java](src-old/main/java/com/fakhruddin/wavegram/ClientMain.java)
+[Main.java](wavegram/client/src/main/java/com/fakhruddin/wavegram/Main.java)
 
 ## Server Example
 
 You have to write all content-related method responses
-implementing [MessageHandler.java](src-old/main/java/com/fakhruddin/wavegram/server/MessageHandler.java). Default
+implementing [MessageHandler.java](wavegram/server/src/main/java/com/fakhruddin/wavegram/server/MessageHandler.java). Default
 implementation
-is [WavegramMessageHandler.java](src-old/main/java/com/fakhruddin/wavegram/server/WavegramMessageHandler.java) (I don't
+is [WavegramMessageHandler.java](wavegram/server/src/main/java/com/fakhruddin/wavegram/server/WavegramMessageHandler.java) (I don't
 know If I will implement all methods).
 
-[ServerMain.java](src-old/main/java/com/fakhruddin/wavegram/ServerMain.java)
+[Main.java](wavegram/server/src/main/java/com/fakhruddin/wavegram/Main.java)
 
 ## Resources
 
