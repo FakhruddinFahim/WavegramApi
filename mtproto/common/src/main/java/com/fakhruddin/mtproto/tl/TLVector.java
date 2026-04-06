@@ -48,7 +48,9 @@ public class TLVector<T> extends TLObject implements List<T> {
   public void writeParams(TLOutputStream ostream) throws Exception {
     ostream.writeInt32(items.size());
     for (T item : items) {
-      if (item instanceof TLObject object) {
+      if (item instanceof MTMessage message) {
+        message.writeParams(ostream);
+      } else if (item instanceof TLObject object) {
         object.isBareType = isBareTypeItem;
         object.write(ostream);
       } else if (item instanceof Integer integer) {
@@ -57,6 +59,8 @@ public class TLVector<T> extends TLObject implements List<T> {
         ostream.writeInt64(int64);
       } else if (item instanceof Double double_) {
         ostream.writeDouble(double_);
+      } else if (item instanceof String string) {
+        ostream.writeTLString(string);
       } else if (item instanceof byte[] bytes) {
         ostream.writeTLBytes(bytes);
       }
@@ -68,39 +72,39 @@ public class TLVector<T> extends TLObject implements List<T> {
     items.clear();
     int size = istream.readInt32();
     for (int i = 0; i < size; i++) {
-      if (Modifier.isAbstract(clazz.getModifiers())) {
+      if (clazz == Integer.class) {
+        Integer integer = istream.readInt32();
+        items.add(clazz.cast(integer));
+      } else if (clazz == Long.class) {
+        Long int64 = istream.readInt64();
+        items.add(clazz.cast(int64));
+      } else if (clazz == Double.class) {
+        Double value = istream.readDouble();
+        items.add(clazz.cast(value));
+      } else if (clazz == String.class) {
+        String value = istream.readTLString();
+        items.add(clazz.cast(value));
+      } else if (clazz == Byte[].class) {
+        byte[] value = istream.readTLBytes();
+        items.add(clazz.cast(value));
+      } else if (clazz == MTMessage.class) {
+        MTMessage message = new MTMessage();
+        message.readParams(istream, context);
+        items.add(clazz.cast(message));
+      } else if (TLObject.class.isAssignableFrom(clazz) && Modifier.isAbstract(clazz.getModifiers()) &&
+        !clazz.equals(TLObject.class)) {
         Method readType = clazz.getMethod("readType", TLInputStream.class, TLContext.class);
         T obj = (T) readType.invoke(null, istream, context);
         items.add(obj);
-      } else {
-        if (clazz.getName().equals(Integer.class.getName())) {
-          Integer integer = istream.readInt32();
-          items.add(clazz.cast(integer));
-        } else if (clazz.getName().equals(Long.class.getName())) {
-          Long int64 = istream.readInt64();
-          items.add(clazz.cast(int64));
-        } else if (clazz.getName().equals(Double.class.getName())) {
-          Double value = istream.readDouble();
-          items.add(clazz.cast(value));
-        } else if (clazz.getName().equals(String.class.getName())) {
-          String value = istream.readTLString();
-          items.add(clazz.cast(value));
-        } else if (clazz.getName().equals(MTMessage.class.getName())) {
-          MTMessage message = new MTMessage();
-          message.readParams(istream, context);
-          items.add(clazz.cast(message));
-        } else if (clazz.getName().equals(Byte[].class.getName())) {
-          byte[] value = istream.readTLBytes();
-          items.add(clazz.cast(value));
-        } else {
-          T object = clazz.getDeclaredConstructor().newInstance();
-          if (object instanceof TLObject tlObject) {
-            tlObject.isBareType = isBareTypeItem;
-            tlObject.read(istream, context);
-            items.add(object);
-          }
+      } else if (TLObject.class.isAssignableFrom(clazz) && !Modifier.isAbstract(clazz.getModifiers())) {
+        T object = clazz.getDeclaredConstructor().newInstance();
+        if (object instanceof TLObject tlObject) {
+          tlObject.isBareType = isBareTypeItem;
+          tlObject.read(istream, context);
         }
-
+        items.add(object);
+      } else {
+        items.add((T) context.readObject(istream));
       }
     }
   }
