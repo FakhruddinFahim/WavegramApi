@@ -37,7 +37,7 @@ public class MTProtoClient extends TcpSocket {
   private ExecutorService writeExecutor;
   private ScheduledExecutorService scheduledExecutor;
 
-  private ScheduledFuture<?> saltScheduleFuture;
+  private ScheduledFuture<?> updateSaltFuture;
   private ScheduledFuture<?> pingDelayScheduleFuture;
   private ScheduledFuture<?> tempAuthScheduleFuture;
 
@@ -268,10 +268,7 @@ public class MTProtoClient extends TcpSocket {
         }
         session.futureSalts = clientManager.getSalts(dcId);
 
-        MTProtoScheme.future_salt latestSalt = session.getLatestSalt();
-        if (latestSalt != null) {
-          saltScheduleFuture = scheduledExecutor.schedule(updateSalt, (latestSalt.valid_until - (60 * 1)) - (session.getServerTime() / 1000), TimeUnit.SECONDS);
-        }
+        scheduleSaltUpdate();
 
         if (PFS) {
           if ((tempAuthKey = clientManager.getAuthKey(dcId, AuthKey.Type.TEMP_AUTH_KEY)) != null && tempAuthKey.expireAt - (session.getServerTime() / 1000) > 0) {
@@ -438,7 +435,6 @@ public class MTProtoClient extends TcpSocket {
 
   private void onMessageReceived(MTMessage message) {
     try {
-      removeStoredMsgs();
       TLObject object = context.readConstructor(new TLInputStream(message.messageData));
       Logger.logger.logd("\n\tmsg: " + message + "\n\tobject: " + object + "\n");
       switch (object) {
@@ -545,33 +541,32 @@ public class MTProtoClient extends TcpSocket {
             }
             write(remove);
           }
-          if (saltScheduleFuture != null) {
-            saltScheduleFuture.cancel(true);
+          if (updateSaltFuture != null) {
+            updateSaltFuture.cancel(true);
           }
-          updateSalt.run();
+          MTProtoScheme.get_future_salts getFutureSalts = new MTProtoScheme.get_future_salts();
+          getFutureSalts.num = 5;
+          _executeRpc(getFutureSalts);
         }
-        case MTProtoScheme.future_salts futureSalts2 -> {
-          ackedMsgs.add(futureSalts2.req_msg_id);
-          sentMessages.remove(futureSalts2.req_msg_id);
-          session.addSalts(futureSalts2.salts);
+        case MTProtoScheme.future_salts futureSalts -> {
+          ackedMsgs.add(futureSalts.req_msg_id);
+          sentMessages.remove(futureSalts.req_msg_id);
+          session.addSalts(futureSalts.salts);
           session.removeExpiredSalts();
           if (clientManager != null) {
-            clientManager.setSalts(dcId, futureSalts2.salts);
+            clientManager.setSalts(dcId, futureSalts.salts);
           }
           MTProtoScheme.future_salt latestSalt = session.getLatestSalt();
-          if (saltScheduleFuture != null) {
-            saltScheduleFuture.cancel(true);
-          }
           if (latestSalt != null) {
-            saltScheduleFuture = scheduledExecutor.schedule(updateSalt, (latestSalt.valid_until - (60 * 1)) - (session.getServerTime() / 1000), TimeUnit.SECONDS);
+            scheduleSaltUpdate();
           }
-          RpcCallback rpcCallback = rpcCallbacks.remove(futureSalts2.req_msg_id);
+          RpcCallback rpcCallback = rpcCallbacks.remove(futureSalts.req_msg_id);
           if (rpcCallback != null) {
             if (rpcCallback.callback != null) {
               executor.execute(() -> rpcCallback.callback.object(object));
             }
             rpcCallback.cancelTimeout();
-            rpcCallback.future.complete(futureSalts2);
+            rpcCallback.future.complete(futureSalts);
           }
         }
         case MTProtoScheme.rpc_result rpcResult -> {
@@ -689,6 +684,7 @@ public class MTProtoClient extends TcpSocket {
     } catch (Exception e) {
       e.printStackTrace();
     }
+    removeStoredMsgs();
   }
 
   private void computeAuthKey() throws Exception {
@@ -974,10 +970,7 @@ public class MTProtoClient extends TcpSocket {
           clientManager.setSession(dcId, session);
           clientManager.setSalts(dcId, session.futureSalts);
         }
-        if (saltScheduleFuture != null) {
-          saltScheduleFuture.cancel(true);
-        }
-        saltScheduleFuture = scheduledExecutor.schedule(updateSalt, (session.getLatestSalt().valid_until - (60 * 1)) - (session.getServerTime() / 1000), TimeUnit.SECONDS);
+        scheduleSaltUpdate();
         tempAuthScheduleFuture = scheduledExecutor.schedule(this::createTempAuthKey, tempAuthKeyExpire - 60, TimeUnit.SECONDS);
 
         if (protoCallback != null) {
@@ -1006,7 +999,7 @@ public class MTProtoClient extends TcpSocket {
         if (PFS) {
           createTempAuthKey();
         } else {
-          saltScheduleFuture = scheduledExecutor.schedule(updateSalt, (session.getLatestSalt().valid_until - (60 * 1)) - (session.getServerTime() / 1000), TimeUnit.SECONDS);
+          scheduleSaltUpdate();
           protoCallback.onStart();
           startFuture.complete(null);
         }
@@ -1072,11 +1065,17 @@ public class MTProtoClient extends TcpSocket {
     }
   }
 
-  private final Runnable updateSalt = () -> {
-    MTProtoScheme.get_future_salts getFutureSalts = new MTProtoScheme.get_future_salts();
-    getFutureSalts.num = 5;
-    _executeRpc(getFutureSalts);
-  };
+  private void scheduleSaltUpdate() {
+    if (updateSaltFuture != null) {
+      updateSaltFuture.cancel(true);
+    }
+    MTProtoScheme.future_salt latestSalt = session.getLatestSalt();
+    updateSaltFuture = scheduledExecutor.schedule(() -> {
+      MTProtoScheme.get_future_salts getFutureSalts = new MTProtoScheme.get_future_salts();
+      getFutureSalts.num = 5;
+      _executeRpc(getFutureSalts);
+    }, latestSalt.valid_until - (session.getServerTime() / 1000) - 60, TimeUnit.SECONDS);
+  }
 
   public void setProtoCallback(ProtoCallback protoCallback) {
     this.protoCallback = protoCallback;
@@ -1440,8 +1439,8 @@ public class MTProtoClient extends TcpSocket {
     if (pingDelayScheduleFuture != null) {
       pingDelayScheduleFuture.cancel(true);
     }
-    if (saltScheduleFuture != null) {
-      saltScheduleFuture.cancel(true);
+    if (updateSaltFuture != null) {
+      updateSaltFuture.cancel(true);
     }
     if (tempAuthScheduleFuture != null) {
       tempAuthScheduleFuture.cancel(true);
