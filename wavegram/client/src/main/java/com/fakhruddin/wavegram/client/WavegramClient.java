@@ -268,13 +268,13 @@ public class WavegramClient extends MTProtoClient {
       }
 
       @Override
-      public void onTransportError(int code) {
+      public void onTransportError(TransportError error) {
         if (wavegramManager != null) {
           wavegramManager.removeUser();
           wavegramManager.removeLoggedInDcId(dcId);
         }
         if (protoCallback != null) {
-          protoCallback.onTransportError(code);
+          protoCallback.onTransportError(error);
         }
       }
 

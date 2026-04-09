@@ -1,9 +1,6 @@
 package com.fakhruddin.mtproto;
 
-import com.fakhruddin.mtproto.client.MTProtoClient;
-import com.fakhruddin.mtproto.client.ProtoCallback;
-import com.fakhruddin.mtproto.client.RpcException;
-import com.fakhruddin.mtproto.client.RpcFuture;
+import com.fakhruddin.mtproto.client.*;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLContext;
 import com.fakhruddin.mtproto.tl.TLObject;
@@ -56,8 +53,8 @@ public class Main {
       }
 
       @Override
-      public void onTransportError(int code) {
-        System.out.println(TAG + ".onTransportError: " + code);
+      public void onTransportError(TransportError error) {
+        System.out.println(TAG + ".onTransportError: " + error);
       }
 
       @Override

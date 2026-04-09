@@ -2,6 +2,7 @@ package com.fakhruddin.wavegram;
 
 import com.fakhruddin.mtproto.AuthKey;
 import com.fakhruddin.mtproto.client.ProtoCallback;
+import com.fakhruddin.mtproto.client.TransportError;
 import com.fakhruddin.mtproto.protocol.IntermediateProtocol;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLContext;
@@ -83,8 +84,8 @@ public class Main {
       }
 
       @Override
-      public void onTransportError(int code) {
-        System.out.println(TAG + ".onTransportError: " + code);
+      public void onTransportError(TransportError error) {
+        System.out.println(TAG + ".onTransportError: " + error);
       }
 
       @Override

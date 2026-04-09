@@ -324,12 +324,21 @@ public class MTProtoClient extends TcpSocket {
       }
 
       while (isConnected()) {
-        MTMessage message = read();
-        if (message.messageLength == 4) {
-          int code = new TLInputStream(message.messageData).readInt();
-          if (code == -404 || code == -444 || code == -429) {
-            throw new TransportException(code);
-          }
+        byte[] buffer = protocol.readMsg(inputStream);
+        TLInputStream istream = new TLInputStream(buffer);
+        if (buffer.length == 4) {
+          onTransportError(TransportError.fromInt(istream.readInt32()));
+          break;
+        }
+        long authKeyId = istream.readLong();
+        istream.position(0);
+        MTMessage message = new MTMessage();
+        message.mtprotoVersion = mtprotoVersion;
+        message.x = 8;
+        if (tempAuthKey != null && tempAuthKey.getAuthKeyId() == authKeyId) {
+          message.read(istream, tempAuthKey);
+        } else {
+          message.read(istream, authKey);
         }
 
         if (message.authKeyId != 0) {
@@ -388,9 +397,6 @@ public class MTProtoClient extends TcpSocket {
           }
         }
       }
-    } catch (TransportException transportException) {
-      Logger.logger.loge(transportException.getMessage());
-      onTransportError(transportException.getErrorCode());
     } catch (Exception e) {
       e.printStackTrace();
       Logger.logger.loge(e.getMessage());
@@ -1406,33 +1412,13 @@ public class MTProtoClient extends TcpSocket {
     });
   }
 
-  private MTMessage read() throws Exception {
-    byte[] buffer = protocol.readMsg(inputStream);
-    if (buffer.length == 4) {
-      int code = new TLInputStream(buffer).readInt();
-      throw new TransportException(code);
-    }
-    TLInputStream tlInputStream = new TLInputStream(buffer);
-    long authKeyId = tlInputStream.readLong();
-    tlInputStream.position(0);
-    MTMessage message = new MTMessage();
-    message.mtprotoVersion = mtprotoVersion;
-    message.x = 8;
-    if (tempAuthKey != null && tempAuthKey.getAuthKeyId() == authKeyId) {
-      message.read(tlInputStream, tempAuthKey);
-    } else {
-      message.read(tlInputStream, authKey);
-    }
-    return message;
-  }
-
-  private void onTransportError(int code) {
+  private void onTransportError(TransportError error) {
     if (protoCallback != null) {
-      protoCallback.onTransportError(code);
+      protoCallback.onTransportError(error);
     }
-    if (code == -444) {
+    if (error == TransportError.INVALID_DC) {
       switchDc(dcId + 1);
-    } else if (code == -404) {
+    } else if (error == TransportError.AUTH_KEY_NOT_FOUND) {
       if (PFS) {
         tempAuthKey = null;
         if (clientManager != null) {
@@ -1445,8 +1431,6 @@ public class MTProtoClient extends TcpSocket {
       }
       close();
       start();
-    } else if (code == -429) {
-      close();
     } else {
       close();
     }

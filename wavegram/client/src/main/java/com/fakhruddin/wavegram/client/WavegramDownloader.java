@@ -6,6 +6,7 @@ import com.fakhruddin.mtproto.MTSession;
 import com.fakhruddin.mtproto.client.ClientManager;
 import com.fakhruddin.mtproto.client.MTProtoClient;
 import com.fakhruddin.mtproto.client.ProtoCallback;
+import com.fakhruddin.mtproto.client.TransportError;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLObject;
 import com.fakhruddin.mtproto.tl.TLOutputStream;
@@ -351,9 +352,9 @@ public class WavegramDownloader {
           }
 
           @Override
-          public void onTransportError(int code) {
-            System.err.println(TAG + ".onTransportError: " + code);
-            if (code == -404 && wavegramClient.getWavegramManager() != null) {
+          public void onTransportError(TransportError error) {
+            System.err.println(TAG + ".onTransportError: " + error);
+            if (error == TransportError.AUTH_KEY_NOT_FOUND && wavegramClient.getWavegramManager() != null) {
               wavegramClient.getWavegramManager().removeLoggedInDcId(dcId);
             }
           }
@@ -758,9 +759,9 @@ public class WavegramDownloader {
             }
 
             @Override
-            public void onTransportError(int code) {
-              System.err.println(TAG + ".onTransportError: " + code + " " + finalI);
-              if (code == -404 && wavegramClient.getWavegramManager() != null) {
+            public void onTransportError(TransportError error) {
+              System.err.println(TAG + ".onTransportError: " + error + " " + finalI);
+              if (error == TransportError.AUTH_KEY_NOT_FOUND && wavegramClient.getWavegramManager() != null) {
                 wavegramClient.getWavegramManager().removeLoggedInDcId(dcId);
               }
             }
