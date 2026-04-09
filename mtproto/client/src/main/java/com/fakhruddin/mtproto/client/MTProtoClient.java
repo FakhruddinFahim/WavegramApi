@@ -221,7 +221,7 @@ public class MTProtoClient extends TcpSocket {
           reconnect();
           return;
         }
-        onStart();
+        onOpen();
       } catch (Exception e) {
         e.printStackTrace();
       }
@@ -229,7 +229,7 @@ public class MTProtoClient extends TcpSocket {
     return startFuture;
   }
 
-  private void onStart() {
+  private void onOpen() {
     createTempAuthKey = false;
     authRetryId = -1;
     reconnectAttemptCount = 0;
@@ -276,6 +276,7 @@ public class MTProtoClient extends TcpSocket {
               tempAuthScheduleFuture.cancel(true);
             }
             tempAuthScheduleFuture = scheduledExecutor.schedule(this::createTempAuthKey, (tempAuthKey.expireAt - (session.getServerTime() / 1000)) - 60, TimeUnit.SECONDS);
+            onStart();
             if (protoCallback != null) {
               protoCallback.onStart();
             }
@@ -284,6 +285,7 @@ public class MTProtoClient extends TcpSocket {
             createTempAuthKey();
           }
         } else {
+          onStart();
           if (protoCallback != null) {
             protoCallback.onStart();
           }
@@ -370,7 +372,7 @@ public class MTProtoClient extends TcpSocket {
                 item.authKeyId = message.authKeyId;
                 item.containerMessageId = message.messageId;
                 recvMessages.put(item.messageId, item);
-                onMessageReceived(item);
+                onMessage(item);
               } else {
                 Logger.logger.logw("msgId exists or lower than all stored msgs, ignored msg: " + item + " older msg: " +
                   recvMessages.get(item.messageId) + ", object: " + TLContext.read(item.messageData) + "\n");
@@ -385,7 +387,7 @@ public class MTProtoClient extends TcpSocket {
         } else {
           if (!recvMessages.containsKey(message.messageId) && recvMessages.keySet().stream().findFirst().orElse(0L) < message.messageId) {
             recvMessages.put(message.messageId, message);
-            onMessageReceived(message);
+            onMessage(message);
           } else {
             System.err.println(TAG + ".listenForMessage: msgId exists or lower than all stored msgs, ignored msg: " + message + " older msg: " + recvMessages.get(message.messageId) + ", object: " + TLContext.read(message.messageData));
           }
@@ -422,7 +424,7 @@ public class MTProtoClient extends TcpSocket {
       try {
         if (open()) {
           isReconnecting = false;
-          onStart();
+          onOpen();
           break;
         } else {
           Thread.sleep(2000);
@@ -459,7 +461,7 @@ public class MTProtoClient extends TcpSocket {
     executeAuth(req_pq_multi);
   }
 
-  private void onMessageReceived(MTMessage message) {
+  private void onMessage(MTMessage message) {
     try {
       TLObject object = context.readConstructor(new TLInputStream(message.messageData));
       Logger.logger.logd("\n\tmsg: " + message + "\n\tobject: " + object + "\n");
@@ -485,6 +487,7 @@ public class MTProtoClient extends TcpSocket {
             clientManager.setSession(dcId, session);
             clientManager.setSalts(dcId, session.futureSalts);
           }
+          onSessionCreated(newSessionCreated);
           if (protoCallback != null) {
             protoCallback.onSessionCreated(newSessionCreated);
           }
@@ -694,6 +697,8 @@ public class MTProtoClient extends TcpSocket {
         }
       }
 
+      onMessage(message, object);
+
       if (protoCallback != null) {
         protoCallback.onMessage(object);
       }
@@ -711,6 +716,47 @@ public class MTProtoClient extends TcpSocket {
       e.printStackTrace();
     }
     removeStoredMsgs();
+  }
+
+  /**
+   * called when start
+   * <br/>
+   * implement this to handle on start
+   * <br/>
+   * base class version does nothing
+   */
+  protected void onStart() {
+  }
+
+  /**
+   * called when new session created message received.
+   * <br/>
+   * implement this to handle on start
+   * <br/>
+   * base class version does nothing
+   *
+   * @param sessionCreated new session object
+   */
+  protected void onSessionCreated(MTProtoScheme.new_session_created sessionCreated) {
+  }
+
+  /**
+   * implement this to handle message/object
+   *
+   * @param message message
+   * @param object  object
+   */
+  protected void onMessage(MTMessage message, TLObject object) {
+  }
+
+  /**
+   * called when close
+   * <br/>
+   * implement this to handle on close
+   * <br/>
+   * base class version does nothing
+   */
+  protected void onClose() {
   }
 
   private void computeAuthKey() throws Exception {
@@ -1004,6 +1050,7 @@ public class MTProtoClient extends TcpSocket {
         }
         try {
           bindTempAuthKey();
+          onStart();
           if (protoCallback != null) {
             protoCallback.onStart();
           }
@@ -1026,7 +1073,10 @@ public class MTProtoClient extends TcpSocket {
           createTempAuthKey();
         } else {
           scheduleSaltUpdate();
-          protoCallback.onStart();
+          onStart();
+          if (protoCallback != null) {
+            protoCallback.onStart();
+          }
           startFuture.complete(null);
         }
       }
@@ -1060,7 +1110,7 @@ public class MTProtoClient extends TcpSocket {
 
   private void removeStoredMsgs() {
     while (ackedMsgs.size() > sentMsgCacheLimit) {
-      ackedMsgs.remove(0);
+      ackedMsgs.removeFirst();
     }
 
     while (sentMessages.size() > sentMsgCacheLimit) {
@@ -1459,6 +1509,7 @@ public class MTProtoClient extends TcpSocket {
     if (scheduledExecutor != null) {
       scheduledExecutor.shutdownNow();
     }
+    onClose();
     startFuture.complete(null);
     if (protoCallback != null) {
       protoCallback.onClose();

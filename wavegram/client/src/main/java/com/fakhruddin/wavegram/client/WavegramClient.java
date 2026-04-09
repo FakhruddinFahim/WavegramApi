@@ -44,8 +44,6 @@ public class WavegramClient extends MTProtoClient {
   private ApiScheme.messages.dhConfig_ dhConfig;
   private ApiScheme.cdnConfig_ cdnConfig;
 
-  private ProtoCallback protoCallback;
-
   private boolean isAcceptSecretChat = false;
   private SecretMessageCallback secretMessageCallback;
   private final Map<Long, SecretChat> secretChats = new LinkedHashMap<>();
@@ -175,120 +173,54 @@ public class WavegramClient extends MTProtoClient {
   }
 
   @Override
-  public void setProtoCallback(ProtoCallback protoCallback) {
-    this.protoCallback = protoCallback;
-  }
-
-  @Override
   public Future<?> start() {
     initCountDownLatch = new CountDownLatch(1);
     if (scheduledExecutorService != null) {
       scheduledExecutorService.shutdownNow();
     }
     scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
-//        protoClient.setUseIpv6(true);
-    int dcId = wavegramManager.getDcId();
-    if (dcId != -1) {
-      this.dcId = dcId;
-    }
-    setRsaPublicKeys(Config.RSA_PUBLIC_KEYS);
-    super.setProtoCallback(new ProtoCallback() {
-      @Override
-      public void onStart() {
-        initConnection();
-        if (protoCallback != null) {
-          protoCallback.onStart();
-        }
-      }
+    return super.start();
+  }
 
-      @Override
-      public void onSessionCreated(MTProtoScheme.new_session_created sessionCreated) {
-        initCountDownLatch.countDown();
-        if (protoCallback != null) {
-          protoCallback.onSessionCreated(sessionCreated);
-        }
-      }
+  @Override
+  protected void onStart() {
+    initConnection();
+  }
 
-      @Override
-      public void onSessionDestroyed(long sessionId) {
-        if (protoCallback != null) {
-          protoCallback.onSessionDestroyed(sessionId);
-        }
-      }
+  @Override
+  protected void onSessionCreated(MTProtoScheme.new_session_created sessionCreated) {
+    initCountDownLatch.countDown();
+  }
 
-      @Override
-      public void onAuthCreated(AuthKey.Type type) {
-        if (protoCallback != null) {
-          protoCallback.onAuthCreated(type);
-        }
-      }
-
-      @Override
-      public void onAuthDestroyed(AuthKey.Type type) {
-        if (updateScheduledFuture != null) {
-          updateScheduledFuture.cancel(true);
-        }
-        if (type == AuthKey.Type.PERM_AUTH_KEY) {
-          if (wavegramManager != null) {
-            wavegramManager.removeUser();
-            wavegramManager.removeLoggedInDcId(dcId);
-          }
-        }
-        if (protoCallback != null) {
-          protoCallback.onAuthDestroyed(type);
-        }
-      }
-
-      @Override
-      public void onMessage(TLObject object) {
-        if (object instanceof MTProtoScheme.rpc_result rpcResult2 &&
-          rpcResult2.result instanceof MTProtoScheme.rpc_error rpcError2) {
-          if (rpcError2.error_message.equals("AUTH_KEY_UNREGISTERED")) {
-            if (wavegramManager != null) {
-              wavegramManager.removeUser();
-            }
-          }
-        }
-
-        if (object instanceof ApiScheme.updates_ updates) {
-          for (ApiScheme.Update update : updates.updates) {
-            if (update instanceof ApiScheme.updateEncryption updateEncryption) {
-              scheduledExecutorService.submit(() ->
-                WavegramClient.this.onUpdateEncryption(updateEncryption));
-            } else if (update instanceof ApiScheme.updateNewEncryptedMessage updateNewEncryptedMessage) {
-              scheduledExecutorService.submit(() ->
-                WavegramClient.this.onUpdateNewEncryptedMessage(updateNewEncryptedMessage));
-            }
-          }
-        }
-        if (protoCallback != null) {
-          protoCallback.onMessage(object);
-        }
-
-      }
-
-      @Override
-      public void onTransportError(TransportError error) {
+  @Override
+  protected void onMessage(MTMessage message, TLObject object) {
+    if (object instanceof MTProtoScheme.rpc_result rpcResult &&
+      rpcResult.result instanceof MTProtoScheme.rpc_error rpcError) {
+      if (rpcError.error_message.equals("AUTH_KEY_UNREGISTERED")) {
         if (wavegramManager != null) {
           wavegramManager.removeUser();
-          wavegramManager.removeLoggedInDcId(dcId);
-        }
-        if (protoCallback != null) {
-          protoCallback.onTransportError(error);
         }
       }
+    }
 
-      @Override
-      public void onClose() {
-        if (updateScheduledFuture != null) {
-          updateScheduledFuture.cancel(true);
-        }
-        if (protoCallback != null) {
-          protoCallback.onClose();
+    if (object instanceof ApiScheme.updates_ updates) {
+      for (ApiScheme.Update update : updates.updates) {
+        if (update instanceof ApiScheme.updateEncryption updateEncryption) {
+          scheduledExecutorService.submit(() ->
+            WavegramClient.this.onUpdateEncryption(updateEncryption));
+        } else if (update instanceof ApiScheme.updateNewEncryptedMessage updateNewEncryptedMessage) {
+          scheduledExecutorService.submit(() ->
+            WavegramClient.this.onUpdateNewEncryptedMessage(updateNewEncryptedMessage));
         }
       }
-    });
-    return super.start();
+    }
+  }
+
+  @Override
+  protected void onClose() {
+    if (!isConnected && initCountDownLatch != null) {
+      initCountDownLatch.countDown();
+    }
   }
 
   @Override
@@ -1783,9 +1715,6 @@ public class WavegramClient extends MTProtoClient {
     super.close();
     if (scheduledExecutorService != null) {
       scheduledExecutorService.shutdownNow();
-    }
-    if (initCountDownLatch != null) {
-      initCountDownLatch.countDown();
     }
     wavegramUploader.close();
     wavegramDownloader.close();
