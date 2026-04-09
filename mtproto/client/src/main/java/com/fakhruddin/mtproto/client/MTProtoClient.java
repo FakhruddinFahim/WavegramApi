@@ -303,6 +303,26 @@ public class MTProtoClient extends TcpSocket {
 
   private void loop() {
     try {
+      MTProtoScheme.msg_container msgContainer = new MTProtoScheme.msg_container();
+      for (long msgId : resentMessages) {
+        MTMessage message = sentMessages.remove(msgId);
+        if (message == null) {
+          continue;
+        }
+        TLInputStream istream = new TLInputStream(message.messageData);
+        if (istream.readInt32() == MTProtoScheme.msg_container.ID) {
+          MTProtoScheme.msg_container container = new MTProtoScheme.msg_container();
+          container.readParams(istream, context);
+          _executeRpc(container);
+        } else {
+          msgContainer.messages.add(message);
+        }
+      }
+      resentMessages.clear();
+      if (!msgContainer.messages.isEmpty()) {
+        _executeRpc(msgContainer);
+      }
+
       while (isConnected()) {
         MTMessage message = read();
         if (message.messageLength == 4) {
