@@ -33,7 +33,7 @@ public class MTProtoClient extends TcpSocket {
   private byte[] calculatedAuthKey;
   private RSA selectedPublicRsaKey;
   private static final int AUTH_RETRY_LIMIT = 5;
-  private ExecutorService executor;
+  protected ExecutorService executor;
   private ExecutorService writeExecutor;
   private ScheduledExecutorService scheduledExecutor;
 
@@ -1048,16 +1048,19 @@ public class MTProtoClient extends TcpSocket {
         if (protoCallback != null) {
           protoCallback.onAuthCreated(AuthKey.Type.TEMP_AUTH_KEY);
         }
-        try {
-          bindTempAuthKey();
-          onStart();
-          if (protoCallback != null) {
-            protoCallback.onStart();
+
+        executor.execute(() -> {
+          try {
+            bindTempAuthKey();
+            onStart();
+            if (protoCallback != null) {
+              protoCallback.onStart();
+            }
+            startFuture.complete(null);
+          } catch (Exception e) {
+            e.printStackTrace();
           }
-          startFuture.complete(null);
-        } catch (Exception e) {
-          e.printStackTrace();
-        }
+        });
       } else {
         authKey = new AuthKey(calculatedAuthKey);
         authKey.setType(AuthKey.Type.PERM_AUTH_KEY);
