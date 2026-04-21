@@ -68,7 +68,7 @@ public class MTProtoClient extends TcpSocket {
   /**
    * temp auth key expire time in second
    */
-  private int tempAuthKeyExpire = 60 * 24 * 7;
+  private int tempAuthKeyExpire = 60 * 60 * 24;
   private volatile boolean PFS = false;
   private volatile boolean createTempAuthKey = false;
   private int pingDelay = 60;
