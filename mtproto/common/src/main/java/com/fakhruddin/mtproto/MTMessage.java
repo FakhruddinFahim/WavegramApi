@@ -37,12 +37,7 @@ public class MTMessage extends TLObject {
 
   }
 
-  public void setMessageData(byte[] messageData) {
-    this.messageData = messageData;
-    this.messageLength = this.messageData.length;
-  }
-
-  public void setMessageData(TLObject object) {
+  public void writeObject(TLObject object) {
     TLOutputStream outputStream = new TLOutputStream();
     try {
       object.write(outputStream);

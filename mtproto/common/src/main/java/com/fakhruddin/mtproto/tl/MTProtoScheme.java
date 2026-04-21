@@ -1264,7 +1264,7 @@ public TLObject result;
   @Override
   public void readParams(TLInputStream istream, TLContext context) throws Exception {
 req_msg_id = istream.readInt64();
-result = context.readConstructor(istream);
+//result = context.readConstructor(istream);
 
   }
 

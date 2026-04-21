@@ -3,10 +3,7 @@ package com.fakhruddin.wavegram.client;
 import com.fakhruddin.mtproto.AuthKey;
 import com.fakhruddin.mtproto.MTDcOption;
 import com.fakhruddin.mtproto.MTSession;
-import com.fakhruddin.mtproto.client.ClientManager;
-import com.fakhruddin.mtproto.client.MTProtoClient;
-import com.fakhruddin.mtproto.client.ProtoCallback;
-import com.fakhruddin.mtproto.client.TransportError;
+import com.fakhruddin.mtproto.client.*;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLObject;
 import com.fakhruddin.mtproto.tl.TLOutputStream;
@@ -486,18 +483,18 @@ public class WavegramDownloader {
 
             if (importAuthorization.bytes != null) {
               initConnection.query = importAuthorization;
-              Future<TLObject> importFuture = protoClient.executeRpc(invokeWithLayer, object1 -> {
+              Future<TLObject> importFuture = protoClient.executeRpc(invokeWithLayer, RpcOptions.build().callback(object1 -> {
                 if (object1 instanceof ApiScheme.auth.authorization_) {
                   wavegramClient.getWavegramManager().addLoggedInDcId(downloadFile.dcId);
                 }
-              }, -1, false, true);
+              }).initRequired(false));
               importFuture.get();
               importAuthorization.bytes = null;
               needInit = false;
             }
 
             Future<TLObject> getFileFuture = protoClient.executeRpc(needInit ? invokeWithLayer :
-              (getCdnFile.file_token != null ? getCdnFile : getFile));
+              (getCdnFile.file_token != null ? getCdnFile : getFile), RpcOptions.build().initRequired(!needInit));
             needInit = false;
             TLObject object = getFileFuture.get();
             synchronized (downloadFile) {
@@ -902,18 +899,18 @@ public class WavegramDownloader {
 
                 if (importAuthorization.bytes != null) {
                   initConnection.query = importAuthorization;
-                  Future<TLObject> importFuture = protoClient.executeRpc(invokeWithLayer, object1 -> {
+                  Future<TLObject> importFuture = protoClient.executeRpc(invokeWithLayer, RpcOptions.build().callback(object1 -> {
                     if (object1 instanceof ApiScheme.auth.authorization_) {
                       wavegramClient.getWavegramManager().addLoggedInDcId(downloadFile.dcId);
                     }
-                  }, -1, false, true);
+                  }).initRequired(false));
                   importFuture.get();
                   importAuthorization.bytes = null;
                   needInit.set(false);
                 }
 
                 Future<TLObject> getFileFuture = protoClient.executeRpc(needInit.get() ? invokeWithLayer :
-                  (getCdnFile.file_token != null ? getCdnFile : getFile));
+                  (getCdnFile.file_token != null ? getCdnFile : getFile), RpcOptions.build().initRequired(!needInit.get()));
                 TLObject object = getFileFuture.get();
                 needInit.set(false);
                 synchronized (downloadFile) {

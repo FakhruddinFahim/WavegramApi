@@ -18,7 +18,8 @@ public class Main {
     MTProtoClient client = new MTProtoClient(Config.getTelegramDcs());
     client.context = TLContext.context;
     client.rsaPublicRsaKeys = Config.RSA_PUBLIC_KEYS;
-    client.setPFS(true);
+    client.setPingDelay(10);
+    client.setPFS(false);
     client.setProtoCallback(new ProtoCallback() {
       @Override
       public void onStart() {
@@ -67,7 +68,7 @@ public class Main {
     client.start().get();
 
     MTProtoScheme.ping ping = new MTProtoScheme.ping();
-    ping.ping_id = CryptoUtils.randomLong();
+    ping.ping_id = 1;
     RpcFuture future = client.executeRpc(ping);
     try {
       TLObject ignored = future.get();

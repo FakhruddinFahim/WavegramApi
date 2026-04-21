@@ -1148,7 +1148,7 @@ public class MTServerClient {
     } else {
       message.messageId = session.generateMessageId(false);
     }
-    message.setMessageData(object);
+    message.writeObject(object);
     write(message, authRequired);
   }
 

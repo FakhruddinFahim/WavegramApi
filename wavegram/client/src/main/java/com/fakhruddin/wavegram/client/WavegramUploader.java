@@ -2,10 +2,7 @@ package com.fakhruddin.wavegram.client;
 
 import com.fakhruddin.mtproto.AuthKey;
 import com.fakhruddin.mtproto.MTSession;
-import com.fakhruddin.mtproto.client.ClientManager;
-import com.fakhruddin.mtproto.client.MTProtoClient;
-import com.fakhruddin.mtproto.client.ProtoCallback;
-import com.fakhruddin.mtproto.client.TransportError;
+import com.fakhruddin.mtproto.client.*;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLInputStream;
 import com.fakhruddin.mtproto.tl.TLObject;
@@ -214,76 +211,31 @@ public class WavegramUploader {
         List<Future<?>> uploadFutures = new ArrayList<>();
         uploadExecutorServiceMap.put(uploadFile.fileId, uploadExecutorService);
         for (int i = 0; i < threadCount; i++) {
-          CountDownLatch countDownLatch = new CountDownLatch(1);
           MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
           protoClient.setClientManager(new UploadClientManager(wavegramClient.getClientManager()));
           protoClient.setRsaPublicKeys(Config.RSA_PUBLIC_KEYS);
-          protoClient.setProtoCallback(new ProtoCallback() {
-            @Override
-            public void onStart() {
-              ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
-              initConnection.api_id = wavegramClient.apiId;
-              initConnection.device_model = wavegramClient.deviceModel;
-              initConnection.system_version = wavegramClient.systemVersion;
-              initConnection.app_version = wavegramClient.appVersion;
-              initConnection.system_lang_code = wavegramClient.langCode;
-              initConnection.lang_pack = "";
-              initConnection.lang_code = wavegramClient.langCode;
-              initConnection.proxy = null;
-              initConnection.params = null;
-              initConnection.query = new ApiScheme.help.getNearestDc();
-              ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
-              invokeWithLayer.layer = ApiScheme.LAYER_NUM;
-              invokeWithLayer.query = initConnection;
-
-              protoClient.executeRpc(invokeWithLayer, object -> {
-                if (object instanceof ApiScheme.nearestDc_) {
-                  countDownLatch.countDown();
-                }
-              });
-            }
-
-            @Override
-            public void onSessionCreated(MTProtoScheme.new_session_created sessionCreated) {
-              countDownLatch.countDown();
-            }
-
-            @Override
-            public void onSessionDestroyed(long sessionId) {
-
-            }
-
-            @Override
-            public void onAuthCreated(AuthKey.Type type) {
-
-            }
-
-            @Override
-            public void onAuthDestroyed(AuthKey.Type type) {
-
-            }
-
-            @Override
-            public void onMessage(TLObject object) {
-              System.out.println(TAG + ".onMessage: " + object);
-            }
-
-            @Override
-            public void onTransportError(TransportError error) {
-              System.out.println(TAG + ".onTransportError: " + error);
-            }
-
-            @Override
-            public void onClose() {
-              System.out.println(TAG + ".onClose: called");
-            }
-          });
           protoClient.dcId = wavegramClient.dcId;
           protoClient.start();
           List<MTProtoClient> list = new ArrayList<>();
           list.add(protoClient);
           protoClients.put(uploadFile.fileId, list);
-          countDownLatch.await();
+
+          ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
+          initConnection.api_id = wavegramClient.apiId;
+          initConnection.device_model = wavegramClient.deviceModel;
+          initConnection.system_version = wavegramClient.systemVersion;
+          initConnection.app_version = wavegramClient.appVersion;
+          initConnection.system_lang_code = wavegramClient.langCode;
+          initConnection.lang_pack = "";
+          initConnection.lang_code = wavegramClient.langCode;
+          initConnection.proxy = null;
+          initConnection.params = null;
+          initConnection.query = new ApiScheme.help.getNearestDc();
+          ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
+          invokeWithLayer.layer = ApiScheme.LAYER_NUM;
+          invokeWithLayer.query = initConnection;
+
+          protoClient.executeRpc(invokeWithLayer, RpcOptions.build().initRequired(false)).get();
 
           int finalI = i;
           int finalThreadCount = threadCount;
@@ -451,76 +403,31 @@ public class WavegramUploader {
         List<Future<?>> uploadFutures = new ArrayList<>();
         uploadExecutorServiceMap.put(uploadFile.fileId, uploadExecutorService);
         for (int i = 0; i < threadCount; i++) {
-          CountDownLatch countDownLatch = new CountDownLatch(1);
           MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
           protoClient.setClientManager(new UploadClientManager(wavegramClient.getClientManager()));
           protoClient.setRsaPublicKeys(Config.RSA_PUBLIC_KEYS);
-          protoClient.setProtoCallback(new ProtoCallback() {
-            @Override
-            public void onStart() {
-              ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
-              initConnection.api_id = wavegramClient.apiId;
-              initConnection.device_model = wavegramClient.deviceModel;
-              initConnection.system_version = wavegramClient.systemVersion;
-              initConnection.app_version = wavegramClient.appVersion;
-              initConnection.system_lang_code = wavegramClient.langCode;
-              initConnection.lang_pack = "";
-              initConnection.lang_code = wavegramClient.langCode;
-              initConnection.proxy = null;
-              initConnection.params = null;
-              initConnection.query = new ApiScheme.help.getNearestDc();
-              ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
-              invokeWithLayer.layer = ApiScheme.LAYER_NUM;
-              invokeWithLayer.query = initConnection;
-
-              protoClient.executeRpc(invokeWithLayer, object -> {
-                if (object instanceof ApiScheme.nearestDc_) {
-                  countDownLatch.countDown();
-                }
-              });
-            }
-
-            @Override
-            public void onSessionCreated(MTProtoScheme.new_session_created sessionCreated) {
-              countDownLatch.countDown();
-            }
-
-            @Override
-            public void onSessionDestroyed(long sessionId) {
-
-            }
-
-            @Override
-            public void onAuthCreated(AuthKey.Type type) {
-
-            }
-
-            @Override
-            public void onAuthDestroyed(AuthKey.Type type) {
-
-            }
-
-            @Override
-            public void onMessage(TLObject object) {
-              System.out.println(TAG + ".onMessage: " + object);
-            }
-
-            @Override
-            public void onTransportError(TransportError error) {
-              System.out.println(TAG + ".onTransportError: " + error);
-            }
-
-            @Override
-            public void onClose() {
-              System.out.println(TAG + ".onClose: called");
-            }
-          });
           protoClient.dcId = wavegramClient.dcId;
           protoClient.start();
           List<MTProtoClient> list = new ArrayList<>();
           list.add(protoClient);
           protoClients.put(uploadFile.fileId, list);
-          countDownLatch.await();
+
+          ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
+          initConnection.api_id = wavegramClient.apiId;
+          initConnection.device_model = wavegramClient.deviceModel;
+          initConnection.system_version = wavegramClient.systemVersion;
+          initConnection.app_version = wavegramClient.appVersion;
+          initConnection.system_lang_code = wavegramClient.langCode;
+          initConnection.lang_pack = "";
+          initConnection.lang_code = wavegramClient.langCode;
+          initConnection.proxy = null;
+          initConnection.params = null;
+          initConnection.query = new ApiScheme.help.getNearestDc();
+          ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
+          invokeWithLayer.layer = ApiScheme.LAYER_NUM;
+          invokeWithLayer.query = initConnection;
+
+          protoClient.executeRpc(invokeWithLayer, RpcOptions.build().initRequired(false)).get();
 
           int finalI = i;
           int finalThreadCount = threadCount;
