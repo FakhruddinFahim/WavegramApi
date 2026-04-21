@@ -82,13 +82,11 @@ public class MTSession implements Serializable {
 
   public synchronized int generateSeqNo(boolean isContentRelated) {
     int seqNo;
-    synchronized (this) {
-      if (isContentRelated) {
-        seqNo = (contentRelatedCount * 2) + 1;
-        contentRelatedCount++;
-      } else {
-        seqNo = contentRelatedCount * 2;
-      }
+    if (isContentRelated) {
+      seqNo = (contentRelatedCount * 2) + 1;
+      contentRelatedCount++;
+    } else {
+      seqNo = contentRelatedCount * 2;
     }
     return seqNo;
   }
@@ -101,18 +99,12 @@ public class MTSession implements Serializable {
     long weakMessageId = ((System.currentTimeMillis() + serverTimeOffset) / 1000) << 32;
     lastMessageId = Math.max(weakMessageId, lastMessageId + 4);
     if (isClient) {
-      while (lastMessageId % 4 != 0) {
-        lastMessageId++;
-      }
+      lastMessageId += (4 - lastMessageId % 4) % 4;
     } else {
       if (response) {
-        while (lastMessageId % 4 != 1) {
-          lastMessageId++;
-        }
+        lastMessageId += (1 - lastMessageId % 4 + 4) % 4;
       } else {
-        while (lastMessageId % 4 != 3) {
-          lastMessageId++;
-        }
+        lastMessageId += (3 - lastMessageId % 4 + 4) % 4;
       }
     }
     return lastMessageId;
