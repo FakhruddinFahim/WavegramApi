@@ -4,7 +4,7 @@ package com.fakhruddin.mtproto;
  * Created by Fakhruddin Fahim on 08/08/2022
  */
 public enum MTProtoVersion {
-    NONE,
-    MTPROTO_1_0,
-    MTPROTO_2_0,
+  NONE,
+  MTPROTO_1_0,
+  MTPROTO_2_0,
 }

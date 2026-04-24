@@ -7,6 +7,10 @@ application {
   mainClass = "com.fakhruddin.mtproto.Main"
 }
 
+jar {
+  dependsOn(':mtproto:common:jar')
+}
+
 dependencies {
   api project(":mtproto:common")
 }

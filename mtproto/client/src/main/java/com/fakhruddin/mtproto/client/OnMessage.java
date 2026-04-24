@@ -7,7 +7,7 @@ import com.fakhruddin.mtproto.tl.TLObject;
  */
 
 public interface OnMessage {
-    void object(TLObject object);
+  void object(TLObject object);
 }
 
 

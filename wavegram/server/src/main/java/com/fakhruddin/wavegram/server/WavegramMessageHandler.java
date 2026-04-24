@@ -66,7 +66,7 @@ public class WavegramMessageHandler extends MessageHandler {
         } else if (a instanceof help.getConfig getConfig) {
           client.rpcResponse(wavegramServer.getServerConfig(), message.messageId);
         } else if (a instanceof help.getNearestDc getNearestDc) {
-          ApiScheme.nearestDc_ nearestDc = new ApiScheme.nearestDc_();
+          ApiScheme.nearestDc nearestDc = new ApiScheme.nearestDc();
           nearestDc.nearest_dc = wavegramServer.dcId;
           nearestDc.this_dc = wavegramServer.dcId;
           nearestDc.country = "BD";

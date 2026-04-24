@@ -1,6 +1,10 @@
 package com.fakhruddin.mtproto.tl;
 
-import org.json.JSONObject;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public abstract class TLObject {
   public boolean isBareType = false;
@@ -32,10 +36,11 @@ public abstract class TLObject {
 
   public abstract void readParams(TLInputStream istream, TLContext context) throws Exception;
 
-  public JSONObject toJSON() {
-    JSONObject object = new JSONObject();
+  public JsonObject toJSON() {
+    Map<String, Object> object = new LinkedHashMap<>();
     object.put("@id", getId());
     object.put("@name", getName());
-    return object;
+    Gson gson = new Gson();
+    return gson.toJsonTree(object).getAsJsonObject();
   }
 }

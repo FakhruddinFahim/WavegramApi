@@ -10,23 +10,23 @@ import java.util.List;
  * Created by Fakhruddin Fahim on 22/07/2022
  */
 public abstract class ClientManager {
-    public abstract void setDcId(int dcId);
+  public abstract void setDcId(int dcId);
 
-    public abstract int getDcId();
+  public abstract int getDcId();
 
-    public abstract AuthKey getAuthKey(int dcId, AuthKey.Type type);
+  public abstract AuthKey getAuthKey(int dcId, AuthKey.Type type);
 
-    public abstract void setAuthKey(int dcId, AuthKey authKey);
+  public abstract void setAuthKey(int dcId, AuthKey authKey);
 
-    public abstract void deleteAuthKey(int dcId, AuthKey.Type type);
+  public abstract void deleteAuthKey(int dcId, AuthKey.Type type);
 
-    public abstract void setSession(int dcId, MTSession session);
+  public abstract void setSession(int dcId, MTSession session);
 
-    public abstract MTSession getSession(int dcId);
+  public abstract MTSession getSession(int dcId);
 
-    public abstract void deleteSession(int dcId);
+  public abstract void deleteSession(int dcId);
 
-    public abstract List<MTProtoScheme.future_salt> getSalts(int dcId);
+  public abstract List<MTProtoScheme.future_salt> getSalts(int dcId);
 
-    public abstract void setSalts(int dcId, List<MTProtoScheme.future_salt> futureSalts);
+  public abstract void setSalts(int dcId, List<MTProtoScheme.future_salt> futureSalts);
 }

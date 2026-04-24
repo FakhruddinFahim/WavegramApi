@@ -480,7 +480,7 @@ public class MTServerClient {
     }
   }
 
-  MTProtoScheme.resPQ_ resPq;
+  MTProtoScheme.resPQ resPq;
 
   private void onServiceMessage(MTMessage message) {
     try {
@@ -545,7 +545,7 @@ public class MTServerClient {
           }
           write(futureSalts);
         } else if (object instanceof MTProtoScheme.ping_delay_disconnect pingDelayDisconnect) {
-          MTProtoScheme.pong_ pong = new MTProtoScheme.pong_();
+          MTProtoScheme.pong pong = new MTProtoScheme.pong();
           pong.msg_id = message.messageId;
           pong.ping_id = pingDelayDisconnect.ping_id;
           write(pong);
@@ -557,7 +557,7 @@ public class MTServerClient {
           }
           pingDelayScheduledFuture = scheduledExecutorService.schedule(this::close, pingDelayDisconnect.disconnect_delay + 15, TimeUnit.SECONDS);
         } else if (object instanceof MTProtoScheme.ping ping) {
-          MTProtoScheme.pong_ pong = new MTProtoScheme.pong_();
+          MTProtoScheme.pong pong = new MTProtoScheme.pong();
           pong.msg_id = message.messageId;
           pong.ping_id = ping.ping_id;
           write(pong);
@@ -661,7 +661,7 @@ public class MTServerClient {
     for (RSA rsaKey : rsaPrivateKeys) {
       fingerprint.add(rsaKey.getFingerprint());
     }
-    resPq = new MTProtoScheme.resPQ_();
+    resPq = new MTProtoScheme.resPQ();
     resPq.nonce = reqPqMulti.nonce;
     resPq.server_nonce = CryptoUtils.randomBytes(16);
     resPq.pq = calculatePq();
@@ -673,7 +673,7 @@ public class MTServerClient {
 
   DHPublicKey alicePublicKey;
   KeyAgreement aliceKeyAgree;
-  MTProtoScheme.P_Q_inner_data pqInnerData;
+  MTProtoScheme.P_Q_inner_dataType pqInnerData;
   public int authRetryCount = 0;
   byte[] serverTmpAesKey;
   byte[] serverTmpAesIV;
@@ -687,7 +687,7 @@ public class MTServerClient {
     TLInputStream decryptedDataStream = new TLInputStream(decryptedData);
     decryptedDataStream.read();
     byte[] hash = decryptedDataStream.readBytes(20);
-    pqInnerData = MTProtoScheme.P_Q_inner_data.readType(decryptedDataStream, null);
+    pqInnerData = MTProtoScheme.P_Q_inner_dataType.readType(decryptedDataStream, null);
     if (pqInnerData == null) {
       decryptedDataStream.position(0);
       byte[] tempKeyXor = decryptedDataStream.readBytes(32);
@@ -703,7 +703,7 @@ public class MTServerClient {
         throw new SecurityException("sha2TempKeyDataWithPad hash does not matched");
       }
       if (dataWithPad.length == 192) {
-        pqInnerData = MTProtoScheme.P_Q_inner_data.readType(new TLInputStream(dataWithPad), null);
+        pqInnerData = MTProtoScheme.P_Q_inner_dataType.readType(new TLInputStream(dataWithPad), null);
       } else {
         throw new SecurityException("dataWithPad length isn't 192");
       }
@@ -774,7 +774,7 @@ public class MTServerClient {
     alicePublicKey = (DHPublicKey) aliceKpair.getPublic();
     aliceDhPublicParameter = alicePublicKey.getParams();
 
-    MTProtoScheme.server_DH_inner_data_ serverDhInner = new MTProtoScheme.server_DH_inner_data_();
+    MTProtoScheme.server_DH_inner_data serverDhInner = new MTProtoScheme.server_DH_inner_data();
     serverDhInner.nonce = nonce;
     serverDhInner.server_nonce = serverNonce;
     serverDhInner.g = aliceDhPublicParameter.getG().intValue();
@@ -804,7 +804,7 @@ public class MTServerClient {
     byte[] decryptedAnswer = CryptoUtils.AES256IGEDecrypt(clientDHParams.encrypted_data, serverTmpAesIV, serverTmpAesKey);
     TLInputStream byteArrayInputStream1 = new TLInputStream(decryptedAnswer);
     byte[] decryptedAnswerHash = byteArrayInputStream1.readBytes(20);
-    MTProtoScheme.client_DH_inner_data_ clientDhInner = new MTProtoScheme.client_DH_inner_data_();
+    MTProtoScheme.client_DH_inner_data clientDhInner = new MTProtoScheme.client_DH_inner_data();
     clientDhInner.read(byteArrayInputStream1, context);
     TLOutputStream clientDhInnerOutput = new TLOutputStream();
     clientDhInner.write(clientDhInnerOutput);

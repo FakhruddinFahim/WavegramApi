@@ -5,10 +5,15 @@ import com.fakhruddin.mtproto.tl.TLInputStream;
 import com.fakhruddin.mtproto.tl.TLObject;
 import com.fakhruddin.mtproto.tl.TLOutputStream;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import org.json.JSONObject;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Created by Fakhruddin Fahim on 22/07/2022
@@ -307,8 +312,8 @@ public class MTMessage extends TLObject {
   }
 
   @Override
-  public JSONObject toJSON() {
-    JSONObject json = new JSONObject();
+  public JsonObject toJSON() {
+    Map<String, Object> json = new LinkedHashMap<>();
     json.put("x", x);
     json.put("auth_key_id", authKeyId);
     json.put("message_id", messageId);
@@ -316,7 +321,8 @@ public class MTMessage extends TLObject {
     json.put("session_id", sessionId);
     json.put("seq_no", seqNo);
     json.put("message_length", messageLength);
-    return json;
+    Gson gson = new Gson();
+    return gson.toJsonTree(json).getAsJsonObject();
   }
 
   @Override

@@ -132,7 +132,7 @@ public class WavegramDownloader {
     public String thumbSize = "";
     public int state = FILE_QUEUE;
     public long downloadedSize = 0;
-    public ApiScheme.InputFileLocation inputFileLocation;
+    public ApiScheme.InputFileLocationType inputFileLocation;
     public Map<Integer, Long[]> downloadedParts = new HashMap<>();
 
     @Override
@@ -195,13 +195,13 @@ public class WavegramDownloader {
     this.downloadCallback = downloadCallback;
   }
 
-  public void download(ApiScheme.MessageMedia messageMedia) {
-    ApiScheme.InputFileLocation inputFileLocation = null;
+  public void download(ApiScheme.MessageMediaType messageMedia) {
+    ApiScheme.InputFileLocationType inputFileLocation = null;
     long fileSize = 0;
     String filename = null;
     int dcId = 0;
     if (messageMedia instanceof ApiScheme.messageMediaDocument messageMediaDocument) {
-      if (messageMediaDocument.document instanceof ApiScheme.document_ document2) {
+      if (messageMediaDocument.document instanceof ApiScheme.document document2) {
         ApiScheme.inputDocumentFileLocation location = new ApiScheme.inputDocumentFileLocation();
         location.file_reference = document2.file_reference;
         location.access_hash = document2.access_hash;
@@ -210,7 +210,7 @@ public class WavegramDownloader {
         dcId = document2.dc_id;
         inputFileLocation = location;
         if (filename == null) {
-          for (ApiScheme.DocumentAttribute documentAttribute : document2.attributes) {
+          for (ApiScheme.DocumentAttributeType documentAttribute : document2.attributes) {
             if (documentAttribute instanceof ApiScheme.documentAttributeFilename documentAttributeFilename) {
               filename = documentAttributeFilename.file_name;
               break;
@@ -223,14 +223,14 @@ public class WavegramDownloader {
         fileSize = document2.size;
       }
     } else if (messageMedia instanceof ApiScheme.messageMediaPhoto messageMediaPhoto) {
-      if (messageMediaPhoto.photo instanceof ApiScheme.photo_ photo) {
+      if (messageMediaPhoto.photo instanceof ApiScheme.photo photo) {
         ApiScheme.inputPhotoFileLocation photoFileLocation = new ApiScheme.inputPhotoFileLocation();
         photoFileLocation.file_reference = photo.file_reference;
         photoFileLocation.access_hash = photo.access_hash;
         photoFileLocation.id = photo.id;
         dcId = photo.dc_id;
-        ApiScheme.PhotoSize photoSize = photo.sizes.get(photo.sizes.size() - 1);
-        if (photoSize instanceof ApiScheme.photoSize_ photoSize2) {
+        ApiScheme.PhotoSizeType photoSize = photo.sizes.get(photo.sizes.size() - 1);
+        if (photoSize instanceof ApiScheme.photoSize photoSize2) {
           photoFileLocation.thumb_size = photoSize2.type;
           fileSize = photoSize2.size;
         } else if (photoSize instanceof ApiScheme.photoSizeProgressive photoSizeProgressive) {
@@ -257,7 +257,7 @@ public class WavegramDownloader {
 
   }
 
-  public void download(ApiScheme.InputFileLocation inputFileLocation, int dcId, long partSize, long offset,
+  public void download(ApiScheme.InputFileLocationType inputFileLocation, int dcId, long partSize, long offset,
                        long size, OutputStream outputStream, boolean stream) {
     if (executorService == null || executorService.isTerminated()) {
       executorService = Executors.newFixedThreadPool(parallelDownloadLimit);
@@ -375,7 +375,7 @@ public class WavegramDownloader {
         ApiScheme.auth.importAuthorization importAuthorization = new ApiScheme.auth.importAuthorization();
         if (fileCdnRedirect.get() == null) {
           Future<TLObject> importAuthorizationFuture = wavegramClient.exportAuth(protoClient.dcId);
-          if (importAuthorizationFuture.get() instanceof ApiScheme.auth.exportedAuthorization_ exportedAuthorization) {
+          if (importAuthorizationFuture.get() instanceof ApiScheme.auth.exportedAuthorization exportedAuthorization) {
             importAuthorization.id = exportedAuthorization.id;
             importAuthorization.bytes = exportedAuthorization.bytes;
           }
@@ -484,7 +484,7 @@ public class WavegramDownloader {
             if (importAuthorization.bytes != null) {
               initConnection.query = importAuthorization;
               Future<TLObject> importFuture = protoClient.executeRpc(invokeWithLayer, RpcOptions.build().callback(object1 -> {
-                if (object1 instanceof ApiScheme.auth.authorization_) {
+                if (object1 instanceof ApiScheme.auth.authorization) {
                   wavegramClient.getWavegramManager().addLoggedInDcId(downloadFile.dcId);
                 }
               }).initRequired(false));
@@ -500,7 +500,7 @@ public class WavegramDownloader {
             synchronized (downloadFile) {
               long expectedLength = bytesLength < bytesOffset ? bytesLength : (bytesLength - bytesOffset);
 
-              if (object instanceof ApiScheme.upload.file_ file) {
+              if (object instanceof ApiScheme.upload.file file) {
                 if (bytesOffset + expectedLength == file.bytes.length) {
                   outputStream.write(file.bytes, (int) bytesOffset, (int) expectedLength);
                   downloadFile.downloadedSize += expectedLength;
@@ -527,7 +527,7 @@ public class WavegramDownloader {
                   downloadManager.addFile(downloadFile);
                 }
                 getFile.offset += getFile.limit;
-              } else if (object instanceof ApiScheme.upload.cdnFile_ cdnFile) {
+              } else if (object instanceof ApiScheme.upload.cdnFile cdnFile) {
                 TLOutputStream outputStream2 = new TLOutputStream();
                 outputStream2.write(fileCdnRedirect.get().encryption_iv, 0, fileCdnRedirect.get().encryption_iv.length - 4);
                 outputStream2.writeIntBE((int) (getCdnFile.offset / 16));
@@ -641,7 +641,7 @@ public class WavegramDownloader {
     futures.put(downloadFile.fileId, future);
   }
 
-  public void download(ApiScheme.InputFileLocation inputFileLocation, int dcId, long partSize, long offset,
+  public void download(ApiScheme.InputFileLocationType inputFileLocation, int dcId, long partSize, long offset,
                        long size, String filepath, boolean stream) {
     if (executorService == null || executorService.isTerminated()) {
       executorService = Executors.newFixedThreadPool(parallelDownloadLimit);
@@ -782,7 +782,7 @@ public class WavegramDownloader {
           ApiScheme.auth.importAuthorization importAuthorization = new ApiScheme.auth.importAuthorization();
           if (fileCdnRedirect.get() == null) {
             Future<TLObject> importAuthorizationFuture = wavegramClient.exportAuth(protoClient.dcId);
-            if (importAuthorizationFuture.get() instanceof ApiScheme.auth.exportedAuthorization_ exportedAuthorization) {
+            if (importAuthorizationFuture.get() instanceof ApiScheme.auth.exportedAuthorization exportedAuthorization) {
               importAuthorization.id = exportedAuthorization.id;
               importAuthorization.bytes = exportedAuthorization.bytes;
             }
@@ -900,7 +900,7 @@ public class WavegramDownloader {
                 if (importAuthorization.bytes != null) {
                   initConnection.query = importAuthorization;
                   Future<TLObject> importFuture = protoClient.executeRpc(invokeWithLayer, RpcOptions.build().callback(object1 -> {
-                    if (object1 instanceof ApiScheme.auth.authorization_) {
+                    if (object1 instanceof ApiScheme.auth.authorization) {
                       wavegramClient.getWavegramManager().addLoggedInDcId(downloadFile.dcId);
                     }
                   }).initRequired(false));
@@ -916,7 +916,7 @@ public class WavegramDownloader {
                 synchronized (downloadFile) {
                   long expectedLength = bytesLength < bytesOffset ? bytesLength : (bytesLength - bytesOffset);
 
-                  if (object instanceof ApiScheme.upload.file_ file) {
+                  if (object instanceof ApiScheme.upload.file file) {
                     randomAccessFile.seek((getFile.offset + bytesOffset) - downloadFile.offset);
                     if (bytesOffset + expectedLength == file.bytes.length) {
                       randomAccessFile.write(file.bytes, (int) bytesOffset, (int) expectedLength);
@@ -945,7 +945,7 @@ public class WavegramDownloader {
                       downloadManager.addFile(downloadFile);
                     }
                     getFile.offset += getFile.limit;
-                  } else if (object instanceof ApiScheme.upload.cdnFile_ cdnFile) {
+                  } else if (object instanceof ApiScheme.upload.cdnFile cdnFile) {
                     TLOutputStream outputStream = new TLOutputStream();
                     outputStream.write(fileCdnRedirect.get().encryption_iv, 0, fileCdnRedirect.get().encryption_iv.length - 4);
                     outputStream.writeIntBE((int) (getCdnFile.offset / 16));

@@ -106,18 +106,18 @@ public class TLContext {
   public TLObject getProtoConstructor(int id) {
     if (id == TLVector.ID) {
       return new TLVector<TLObject>();
-    } else if (id == MTProtoScheme.resPQ_.ID) {
-      return new MTProtoScheme.resPQ_();
+    } else if (id == MTProtoScheme.resPQ.ID) {
+      return new MTProtoScheme.resPQ();
     } else if (id == MTProtoScheme.p_q_inner_data_dc.ID) {
       return new MTProtoScheme.p_q_inner_data_dc();
     } else if (id == MTProtoScheme.p_q_inner_data_temp_dc.ID) {
       return new MTProtoScheme.p_q_inner_data_temp_dc();
     } else if (id == MTProtoScheme.server_DH_params_ok.ID) {
       return new MTProtoScheme.server_DH_params_ok();
-    } else if (id == MTProtoScheme.server_DH_inner_data_.ID) {
-      return new MTProtoScheme.server_DH_inner_data_();
-    } else if (id == MTProtoScheme.client_DH_inner_data_.ID) {
-      return new MTProtoScheme.client_DH_inner_data_();
+    } else if (id == MTProtoScheme.server_DH_inner_data.ID) {
+      return new MTProtoScheme.server_DH_inner_data();
+    } else if (id == MTProtoScheme.client_DH_inner_data.ID) {
+      return new MTProtoScheme.client_DH_inner_data();
     } else if (id == MTProtoScheme.dh_gen_ok.ID) {
       return new MTProtoScheme.dh_gen_ok();
     } else if (id == MTProtoScheme.dh_gen_retry.ID) {
@@ -140,8 +140,8 @@ public class TLContext {
       return new MTProtoScheme.future_salt();
     } else if (id == MTProtoScheme.future_salts.ID) {
       return new MTProtoScheme.future_salts();
-    } else if (id == MTProtoScheme.pong_.ID) {
-      return new MTProtoScheme.pong_();
+    } else if (id == MTProtoScheme.pong.ID) {
+      return new MTProtoScheme.pong();
     } else if (id == MTProtoScheme.destroy_session_ok.ID) {
       return new MTProtoScheme.destroy_session_ok();
     } else if (id == MTProtoScheme.destroy_session_none.ID) {
@@ -150,8 +150,8 @@ public class TLContext {
       return new MTProtoScheme.new_session_created();
     } else if (id == MTProtoScheme.msg_container.ID) {
       return new MTProtoScheme.msg_container();
-    } else if (id == MTProtoScheme.message_.ID) {
-      return new MTProtoScheme.message_();
+    } else if (id == MTProtoScheme.message.ID) {
+      return new MTProtoScheme.message();
     } else if (id == MTProtoScheme.gzip_packed.ID) {
       return new MTProtoScheme.gzip_packed();
     } else if (id == MTProtoScheme.msgs_ack.ID) {

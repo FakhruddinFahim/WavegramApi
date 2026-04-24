@@ -230,7 +230,7 @@ public class JsonWavegramManager extends WavegramManager {
                     adminId = encryptedChatRequested.admin_id;
                     participantId = encryptedChatRequested.participant_id;
                     date = encryptedChatRequested.date;
-                } else if (secretChat.encryptedChat instanceof ApiScheme.encryptedChat_ encryptedChat2) {
+                } else if (secretChat.encryptedChat instanceof ApiScheme.encryptedChat encryptedChat2) {
                     accessHash = encryptedChat2.access_hash;
                     adminId = encryptedChat2.admin_id;
                     participantId = encryptedChat2.participant_id;
@@ -321,7 +321,7 @@ public class JsonWavegramManager extends WavegramManager {
                         TLInputStream inputStream = new TLInputStream(
                                 Base64.getDecoder().decode(encryptedChatJson.getString("encryptedChat"))
                         );
-                        secretChat.encryptedChat = ApiScheme.EncryptedChat.readType(inputStream, null);
+                        secretChat.encryptedChat = ApiScheme.EncryptedChatType.readType(inputStream, null);
                     }
 
 

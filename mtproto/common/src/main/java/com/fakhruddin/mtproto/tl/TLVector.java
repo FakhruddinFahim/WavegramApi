@@ -1,6 +1,10 @@
 package com.fakhruddin.mtproto.tl;
 
 import com.fakhruddin.mtproto.MTMessage;
+import com.fakhruddin.mtproto.utils.Utils;
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -63,6 +67,8 @@ public class TLVector<T> extends TLObject implements List<T> {
         ostream.writeTLString(string);
       } else if (item instanceof byte[] bytes) {
         ostream.writeTLBytes(bytes);
+      } else if (item instanceof Byte[] bytes) {
+        ostream.writeTLBytes(Utils.toPrimitiveBytes(bytes));
       }
     }
   }
@@ -84,7 +90,7 @@ public class TLVector<T> extends TLObject implements List<T> {
       } else if (clazz == String.class) {
         String value = istream.readTLString();
         items.add(clazz.cast(value));
-      } else if (clazz == Byte[].class) {
+      } else if (clazz == byte[].class || clazz == Byte[].class) {
         byte[] value = istream.readTLBytes();
         items.add(clazz.cast(value));
       } else if (clazz == MTMessage.class) {
@@ -110,20 +116,31 @@ public class TLVector<T> extends TLObject implements List<T> {
   }
 
   @Override
-  public JSONObject toJSON() {
-    JSONObject json = new JSONObject();
+  public JsonObject toJSON() {
+    Map<String, Object> json = new LinkedHashMap<>();
     json.put("@id", getId());
     json.put("@name", getName());
-    JSONArray array = new JSONArray();
-    for (T object : items) {
-      if (object instanceof TLObject tlObject) {
-        array.put(tlObject.toJSON());
-      } else {
-        array.put(object);
+    JsonArray array = new JsonArray();
+    for (T item : items) {
+      if (item instanceof TLObject tlObject) {
+        array.add(tlObject.toJSON());
+      } else if (item instanceof Integer integer) {
+        array.add(integer);
+      } else if (item instanceof Long int64) {
+        array.add(int64);
+      } else if (item instanceof Double double_) {
+        array.add(double_);
+      } else if (item instanceof String string) {
+        array.add(string);
+      } else if (item instanceof byte[] bytes) {
+        array.add(Base64.getEncoder().encodeToString(bytes));
+      } else if (item instanceof Byte[] bytes) {
+        array.add(Base64.getEncoder().encodeToString(Utils.toPrimitiveBytes(bytes)));
       }
     }
     json.put("items", array);
-    return json;
+    Gson gson = new Gson();
+    return gson.toJsonTree(json).getAsJsonObject();
   }
 
   @Override

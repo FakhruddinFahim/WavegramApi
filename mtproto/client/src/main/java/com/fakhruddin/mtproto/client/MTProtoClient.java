@@ -27,8 +27,8 @@ public class MTProtoClient extends TcpSocket {
   private static final String TAG = MTProtoClient.class.getSimpleName();
 
   public List<RSA> rsaPublicRsaKeys = new ArrayList<>();
-  public MTProtoScheme.P_Q_inner_data pqInnerData;
-  private MTProtoScheme.server_DH_inner_data_ serverDHInnerData;
+  public MTProtoScheme.P_Q_inner_dataType pqInnerData;
+  private MTProtoScheme.server_DH_inner_data serverDHInnerData;
   private byte[] tmpAesKey;
   private byte[] tmpAesIv;
   private long authRetryId = -1;
@@ -510,9 +510,9 @@ public class MTProtoClient extends TcpSocket {
         Logger.logger.logd("\n\tmsg: " + message + "\n\tobject: " + object + "\n");
       }
       switch (object) {
-        case MTProtoScheme.resPQ_ resPQ -> processResPQ(resPQ);
+        case MTProtoScheme.resPQ resPQ -> processResPQ(resPQ);
         case MTProtoScheme.server_DH_params_ok serverDHParamsOk -> processServerDHParams(serverDHParamsOk);
-        case MTProtoScheme.Set_client_DH_params_answer setClientDhParamsAnswer ->
+        case MTProtoScheme.Set_client_DH_params_answerType setClientDhParamsAnswer ->
           processClientDHParamsAnswer(setClientDhParamsAnswer);
         case MTProtoScheme.new_session_created newSessionCreated -> {
           session.firstMessageId = newSessionCreated.first_msg_id;
@@ -738,12 +738,12 @@ public class MTProtoClient extends TcpSocket {
         case MTProtoScheme.destroy_auth_key_none destroyAuthKeyNone -> {
         }
         case MTProtoScheme.ping ping -> {
-          MTProtoScheme.pong_ pong = new MTProtoScheme.pong_();
+          MTProtoScheme.pong pong = new MTProtoScheme.pong();
           pong.msg_id = message.messageId;
           pong.ping_id = ping.ping_id;
           executeRpc(pong);
         }
-        case MTProtoScheme.pong_ pong -> {
+        case MTProtoScheme.pong pong -> {
           MessageInfo info = sentMessages.get(pong.msg_id);
           if (info != null) {
             info.cancelTimeout();
@@ -876,7 +876,7 @@ public class MTProtoClient extends TcpSocket {
     calculatedAuthKey = CryptoUtils.alignKeyZero(ga.modPow(b, dhPrime).toByteArray(), 256);
 
 
-    MTProtoScheme.client_DH_inner_data_ clientDHInnerData = new MTProtoScheme.client_DH_inner_data_();
+    MTProtoScheme.client_DH_inner_data clientDHInnerData = new MTProtoScheme.client_DH_inner_data();
     if (pqInnerData instanceof MTProtoScheme.p_q_inner_data_dc pqInnerDataDc) {
       clientDHInnerData.nonce = pqInnerDataDc.nonce;
       clientDHInnerData.server_nonce = pqInnerDataDc.server_nonce;
@@ -911,7 +911,7 @@ public class MTProtoClient extends TcpSocket {
     executeAuth(setClientDhParams);
   }
 
-  private void processResPQ(MTProtoScheme.resPQ_ resPQ) throws Exception {
+  private void processResPQ(MTProtoScheme.resPQ resPQ) throws Exception {
     selectedPublicRsaKey = rsaPublicRsaKeys.stream().filter(k -> resPQ.server_public_key_fingerprints.stream().anyMatch(t -> t == k.getFingerprint())).findFirst().orElseThrow();
     Pair<BigInteger, BigInteger> pqPair = factorize(new BigInteger(resPQ.pq));
 
@@ -1077,7 +1077,7 @@ public class MTProtoClient extends TcpSocket {
     TLInputStream serverDHInnerDataStream = new TLInputStream(serverDHInnerDataDecrypted);
     byte[] serverDHInnerDataHash = serverDHInnerDataStream.readBytes(20);
 
-    serverDHInnerData = new MTProtoScheme.server_DH_inner_data_();
+    serverDHInnerData = new MTProtoScheme.server_DH_inner_data();
     serverDHInnerData.read(serverDHInnerDataStream, context);
     int offset = (int) ((reqDHParamsTime - System.currentTimeMillis()) / 1000);
     session.setServerTime((serverDHInnerData.server_time - offset) * 1000L);
@@ -1091,7 +1091,7 @@ public class MTProtoClient extends TcpSocket {
     computeAuthKey();
   }
 
-  private void processClientDHParamsAnswer(MTProtoScheme.Set_client_DH_params_answer setClientDhParamsAnswer) throws Exception {
+  private void processClientDHParamsAnswer(MTProtoScheme.Set_client_DH_params_answerType setClientDhParamsAnswer) throws Exception {
     if (authRetryId > AUTH_RETRY_LIMIT) {
       throw new SecurityException("auth retry limit reached");
     }

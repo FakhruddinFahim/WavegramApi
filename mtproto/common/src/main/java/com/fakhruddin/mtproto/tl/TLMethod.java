@@ -8,7 +8,7 @@ import java.lang.reflect.Type;
 /**
  * Created by Fakhruddin Fahim on 10/09/2022
  */
-public abstract class TLMethod<T> extends TLObject {
+public abstract class TLMethod<T extends TLObject> extends TLObject {
   private final Class<?> clazz;
 
   public TLMethod(Class<?> clazz) {

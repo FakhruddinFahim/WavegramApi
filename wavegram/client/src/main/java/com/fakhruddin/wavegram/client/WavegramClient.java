@@ -32,15 +32,15 @@ public class WavegramClient extends MTProtoClient {
   public String systemVersion;
   public String appVersion;
   private ScheduledExecutorService scheduledExecutorService;
-  private ApiScheme.config_ config;
+  private ApiScheme.config config;
   private WavegramManager wavegramManager;
   public static final int UPDATE_DELAY_MIN = 30;
   private ScheduledFuture<?> updateScheduledFuture;
   WavegramDownloader wavegramDownloader = new WavegramDownloader(this);
   WavegramUploader wavegramUploader = new WavegramUploader(this);
 
-  private ApiScheme.messages.dhConfig_ dhConfig;
-  private ApiScheme.cdnConfig_ cdnConfig;
+  private ApiScheme.messages.dhConfig dhConfig;
+  private ApiScheme.cdnConfig cdnConfig;
 
   private boolean isAcceptSecretChat = false;
   private SecretMessageCallback secretMessageCallback;
@@ -56,7 +56,7 @@ public class WavegramClient extends MTProtoClient {
     public int g;
     public AuthKey authKey;
     public AuthKey tempAuthKey;
-    public ApiScheme.EncryptedChat encryptedChat;
+    public ApiScheme.EncryptedChatType encryptedChat;
     public int outSeqNo = 0;
     public int inSeqNo = 0;
     public int ttl = 0;
@@ -65,9 +65,9 @@ public class WavegramClient extends MTProtoClient {
   }
 
   public interface SecretMessageCallback {
-    void onStart(ApiScheme.EncryptedChat encryptedChat);
+    void onStart(ApiScheme.EncryptedChatType encryptedChat);
 
-    void onMessage(ApiScheme.EncryptedMessage encryptedMessage, ApiSecretScheme.DecryptedMessage decryptedMessage);
+    void onMessage(ApiScheme.EncryptedMessageType encryptedMessage, ApiSecretScheme.DecryptedMessage decryptedMessage);
 
     void onEnd(long chatId);
   }
@@ -106,10 +106,10 @@ public class WavegramClient extends MTProtoClient {
     invokeWithLayer.query = initConnection;
 
     super.executeRpc(invokeWithLayer, RpcOptions.build().callback(object -> {
-      if (object instanceof ApiScheme.config_ config2) {
+      if (object instanceof ApiScheme.config config2) {
         WavegramClient.this.config = config2;
-        for (ApiScheme.DcOption dcOption : config2.dc_options) {
-          if (dcOption instanceof ApiScheme.dcOption_ dcOption2) {
+        for (ApiScheme.DcOptionType dcOption : config2.dc_options) {
+          if (dcOption instanceof ApiScheme.dcOption dcOption2) {
             try {
               TLOutputStream ostream = new TLOutputStream();
               dcOption2.write(ostream);
@@ -127,7 +127,7 @@ public class WavegramClient extends MTProtoClient {
         }
         if (wavegramManager != null && wavegramManager.getUserId() != -1) {
           updateScheduledFuture = scheduledExecutorService.scheduleAtFixedRate(() -> {
-            executeRpc(new ApiScheme.updates_ns.getState());
+            executeRpc(new ApiScheme.updates.getState());
           }, 0, UPDATE_DELAY_MIN, TimeUnit.MINUTES);
         }
       }
@@ -195,7 +195,7 @@ public class WavegramClient extends MTProtoClient {
     }
 
     if (object instanceof ApiScheme.updates_ updates) {
-      for (ApiScheme.Update update : updates.updates) {
+      for (ApiScheme.UpdateType update : updates.updates) {
         if (update instanceof ApiScheme.updateEncryption updateEncryption) {
           scheduledExecutorService.submit(() ->
             WavegramClient.this.onUpdateEncryption(updateEncryption));
@@ -268,7 +268,7 @@ public class WavegramClient extends MTProtoClient {
   }
 
   private void onUpdateEncryption(ApiScheme.updateEncryption updateEncryption) {
-    if (updateEncryption.chat instanceof ApiScheme.encryptedChat_ encryptedChat) {
+    if (updateEncryption.chat instanceof ApiScheme.encryptedChat encryptedChat) {
       scheduledExecutorService.submit(() -> WavegramClient.this.secretChatAccepted(encryptedChat));
     } else if (updateEncryption.chat instanceof ApiScheme.encryptedChatRequested encryptedChatRequested) {
       scheduledExecutorService.submit(() -> WavegramClient.this.acceptSecretChat(encryptedChatRequested));
@@ -286,7 +286,7 @@ public class WavegramClient extends MTProtoClient {
     if (updateNewEncryptedMessage.message instanceof ApiScheme.encryptedMessageService encryptedMessageService) {
       chatId = encryptedMessageService.chat_id;
       bytes = encryptedMessageService.bytes;
-    } else if (updateNewEncryptedMessage.message instanceof ApiScheme.encryptedMessage_ encryptedMessage) {
+    } else if (updateNewEncryptedMessage.message instanceof ApiScheme.encryptedMessage encryptedMessage) {
       chatId = encryptedMessage.chat_id;
       bytes = encryptedMessage.bytes;
     } else {
@@ -369,7 +369,7 @@ public class WavegramClient extends MTProtoClient {
     }
   }
 
-  public Future<TLObject> requestSecretChat(ApiScheme.inputUser_ inputUser, OnMessage onMessage) {
+  public Future<TLObject> requestSecretChat(ApiScheme.inputUser inputUser, OnMessage onMessage) {
     Future<TLObject> future = getDhConfig();
 
     MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
@@ -440,7 +440,7 @@ public class WavegramClient extends MTProtoClient {
     return completableFuture;
   }
 
-  private void secretChatAccepted(ApiScheme.encryptedChat_ encryptedChat) {
+  private void secretChatAccepted(ApiScheme.encryptedChat encryptedChat) {
     BigInteger gb = new BigInteger(1, encryptedChat.g_a_or_b);
     BigInteger p = new BigInteger(1, dhConfig.p);
     BigInteger g = BigInteger.valueOf(dhConfig.g);
@@ -516,7 +516,7 @@ public class WavegramClient extends MTProtoClient {
       ApiScheme.messages.acceptEncryption acceptEncryption = new ApiScheme.messages.acceptEncryption();
       acceptEncryption.g_b = gb.toByteArray();
       acceptEncryption.key_fingerprint = authKey.getAuthKeyId();
-      ApiScheme.inputEncryptedChat_ inputEncryptedChat2 = new ApiScheme.inputEncryptedChat_();
+      ApiScheme.inputEncryptedChat inputEncryptedChat2 = new ApiScheme.inputEncryptedChat();
       inputEncryptedChat2.chat_id = encryptedChatRequested.id;
       inputEncryptedChat2.access_hash = encryptedChatRequested.access_hash;
       acceptEncryption.peer = inputEncryptedChat2;
@@ -536,7 +536,7 @@ public class WavegramClient extends MTProtoClient {
 
       try {
         TLObject tlObject = executeRpc(acceptEncryption).get();
-        if (tlObject instanceof ApiScheme.EncryptedChat encryptedChat) {
+        if (tlObject instanceof ApiScheme.EncryptedChatType encryptedChat) {
           secretChat.encryptedChat = encryptedChat;
           if (encryptedChat instanceof ApiScheme.encryptedChatDiscarded encryptedChatDiscarded) {
             discardEncryption(encryptedChatDiscarded.id);
@@ -545,7 +545,7 @@ public class WavegramClient extends MTProtoClient {
               wavegramManager.addSecretChat(encryptedChatRequested.id, secretChat);
             }
             secretChats.put(secretChat.chatId, secretChat);
-            if (encryptedChat instanceof ApiScheme.encryptedChat_) {
+            if (encryptedChat instanceof ApiScheme.encryptedChat) {
               ApiSecretScheme.DecryptedMessageActionNotifyLayer17 decryptedMessageActionNotifyLayer17 = new ApiSecretScheme.DecryptedMessageActionNotifyLayer17();
               decryptedMessageActionNotifyLayer17.layer = ApiSecretScheme.LAYER_NUM;
 
@@ -595,7 +595,7 @@ public class WavegramClient extends MTProtoClient {
     getDhConfig.random_length = 16;
 
     return executeRpc(getDhConfig, RpcOptions.build().callback(object -> {
-      if (object instanceof ApiScheme.messages.dhConfig_ dhConfig2) {
+      if (object instanceof ApiScheme.messages.dhConfig dhConfig2) {
         this.dhConfig = dhConfig2;
       }
     }));
@@ -760,10 +760,10 @@ public class WavegramClient extends MTProtoClient {
     }
   }
 
-  private void onDecryptedMessage(ApiScheme.EncryptedMessage encryptedMessage,
+  private void onDecryptedMessage(ApiScheme.EncryptedMessageType encryptedMessage,
                                   ApiSecretScheme.DecryptedMessage decryptedMessage) {
     if (decryptedMessage instanceof ApiSecretScheme.DecryptedMessage73 decryptedMessage73) {
-      if (encryptedMessage instanceof ApiScheme.encryptedMessage_ encryptedMessage2) {
+      if (encryptedMessage instanceof ApiScheme.encryptedMessage encryptedMessage2) {
         if (encryptedMessage2.random_id != decryptedMessage73.randomId) {
           discardEncryption(encryptedMessage2.chat_id);
           return;
@@ -773,7 +773,7 @@ public class WavegramClient extends MTProtoClient {
         }
       }
     } else if (decryptedMessage instanceof ApiSecretScheme.DecryptedMessage45 decryptedMessage45) {
-      if (encryptedMessage instanceof ApiScheme.encryptedMessage_ encryptedMessage2) {
+      if (encryptedMessage instanceof ApiScheme.encryptedMessage encryptedMessage2) {
         if (encryptedMessage2.random_id != decryptedMessage45.randomId) {
           discardEncryption(encryptedMessage2.chat_id);
           return;
@@ -783,7 +783,7 @@ public class WavegramClient extends MTProtoClient {
         }
       }
     } else if (decryptedMessage instanceof ApiSecretScheme.DecryptedMessage17 decryptedMessage17) {
-      if (encryptedMessage instanceof ApiScheme.encryptedMessage_ encryptedMessage2) {
+      if (encryptedMessage instanceof ApiScheme.encryptedMessage encryptedMessage2) {
         if (encryptedMessage2.random_id != decryptedMessage17.randomId) {
           discardEncryption(encryptedMessage2.chat_id);
           return;
@@ -793,7 +793,7 @@ public class WavegramClient extends MTProtoClient {
         }
       }
     } else if (decryptedMessage instanceof ApiSecretScheme.DecryptedMessage8 decryptedMessage8) {
-      if (encryptedMessage instanceof ApiScheme.encryptedMessage_ encryptedMessage2) {
+      if (encryptedMessage instanceof ApiScheme.encryptedMessage encryptedMessage2) {
         if (encryptedMessage2.random_id != decryptedMessage8.randomId) {
           discardEncryption(encryptedMessage2.chat_id);
           return;
@@ -896,9 +896,9 @@ public class WavegramClient extends MTProtoClient {
       TLOutputStream outputStream = new TLOutputStream();
       outMessage.write(outputStream, secretChat.authKey);
 
-      ApiScheme.inputEncryptedChat_ inputEncryptedChat = new ApiScheme.inputEncryptedChat_();
+      ApiScheme.inputEncryptedChat inputEncryptedChat = new ApiScheme.inputEncryptedChat();
       inputEncryptedChat.chat_id = (int) chatId;
-      if (secretChat.encryptedChat instanceof ApiScheme.encryptedChat_ encryptedChat) {
+      if (secretChat.encryptedChat instanceof ApiScheme.encryptedChat encryptedChat) {
         inputEncryptedChat.access_hash = encryptedChat.access_hash;
       }
 
@@ -940,7 +940,7 @@ public class WavegramClient extends MTProtoClient {
   }
 
   public Future<TLObject> sendEncryptedFile(long chatId, ApiSecretScheme.DecryptedMessage decryptedMessage,
-                                            ApiScheme.InputEncryptedFile inputEncryptedFile, OnMessage onMessage) {
+                                            ApiScheme.InputEncryptedFileType inputEncryptedFile, OnMessage onMessage) {
     SecretChat secretChat = secretChats.get(chatId);
     if (secretChat == null && wavegramManager != null) {
       secretChat = wavegramManager.getSecretChat(chatId);
@@ -995,9 +995,9 @@ public class WavegramClient extends MTProtoClient {
       TLOutputStream outputStream = new TLOutputStream();
       outMessage.write(outputStream, secretChat.authKey);
 
-      ApiScheme.inputEncryptedChat_ inputEncryptedChat = new ApiScheme.inputEncryptedChat_();
+      ApiScheme.inputEncryptedChat inputEncryptedChat = new ApiScheme.inputEncryptedChat();
       inputEncryptedChat.chat_id = (int) chatId;
-      if (secretChat.encryptedChat instanceof ApiScheme.encryptedChat_ encryptedChat) {
+      if (secretChat.encryptedChat instanceof ApiScheme.encryptedChat encryptedChat) {
         inputEncryptedChat.access_hash = encryptedChat.access_hash;
       }
 
@@ -1093,7 +1093,7 @@ public class WavegramClient extends MTProtoClient {
               CryptoUtils.xor(CryptoUtils.substring(digest, 0, 4),
                 CryptoUtils.substring(digest, 4, 4))).readInt();
 
-            ApiScheme.InputEncryptedFile inputEncryptedFile = null;
+            ApiScheme.InputEncryptedFileType inputEncryptedFile = null;
             if (uploadFile.bytesUploaded >= WavegramUploader.MIN_LARGE_FILE_SIZE) {
               ApiScheme.inputEncryptedFileBigUploaded inputEncryptedFileBigUploaded = new ApiScheme.inputEncryptedFileBigUploaded();
               inputEncryptedFileBigUploaded.id = fileId;
@@ -1273,7 +1273,7 @@ public class WavegramClient extends MTProtoClient {
               CryptoUtils.xor(CryptoUtils.substring(digest, 0, 4),
                 CryptoUtils.substring(digest, 4, 4))).readInt();
 
-            ApiScheme.InputEncryptedFile inputEncryptedFile = null;
+            ApiScheme.InputEncryptedFileType inputEncryptedFile = null;
             if (uploadFile.bytesUploaded >= WavegramUploader.MIN_LARGE_FILE_SIZE) {
               ApiScheme.inputEncryptedFileBigUploaded inputEncryptedFileBigUploaded = new ApiScheme.inputEncryptedFileBigUploaded();
               inputEncryptedFileBigUploaded.id = fileId;
@@ -1349,10 +1349,10 @@ public class WavegramClient extends MTProtoClient {
     });
   }
 
-  public void downloadEncryptedFile(ApiScheme.EncryptedFile encryptedFile,
+  public void downloadEncryptedFile(ApiScheme.EncryptedFileType encryptedFile,
                                     ApiSecretScheme.DecryptedMessageMedia decryptedMessageMedia) {
-    ApiScheme.encryptedFile_ encryptedFile2 = null;
-    if (encryptedFile instanceof ApiScheme.encryptedFile_ encrypted2) {
+    ApiScheme.encryptedFile encryptedFile2 = null;
+    if (encryptedFile instanceof ApiScheme.encryptedFile encrypted2) {
       encryptedFile2 = encrypted2;
     } else {
       return;
@@ -1476,7 +1476,7 @@ public class WavegramClient extends MTProtoClient {
     sendCode.api_hash = apiHash;
     sendCode.api_id = apiId;
     sendCode.phone_number = phoneNumber;
-    ApiScheme.codeSettings_ codeSettings = new ApiScheme.codeSettings_();
+    ApiScheme.codeSettings codeSettings = new ApiScheme.codeSettings();
     codeSettings.allow_missed_call = false;
     codeSettings.allow_flashcall = false;
     codeSettings.allow_app_hash = true;
@@ -1485,8 +1485,8 @@ public class WavegramClient extends MTProtoClient {
     sendCode.settings = codeSettings;
 
     executeRpc(sendCode, RpcOptions.build().callback(object -> {
-      if (object instanceof ApiScheme.auth.sentCode_ sentCode2) {
-        onMessage.object(sentCode2);
+      if (object instanceof ApiScheme.auth.sentCode sentCode) {
+        onMessage.object(sentCode);
       } else if (object instanceof MTProtoScheme.rpc_error rpcError2) {
         if (ApiError.contains("PHONE_MIGRATE_X", rpcError2.error_message)) {
           int dcId = ApiError.getInt(rpcError2.error_message);
@@ -1513,15 +1513,15 @@ public class WavegramClient extends MTProtoClient {
     signIn.phone_code = phoneCode;
 
     return executeRpc(signIn, RpcOptions.build().callback(object -> {
-      if (object instanceof ApiScheme.auth.authorization_ authorization) {
-        if (authorization.user instanceof ApiScheme.user_ user) {
+      if (object instanceof ApiScheme.auth.authorization authorization) {
+        if (authorization.user instanceof ApiScheme.user user) {
           if (wavegramManager != null) {
             wavegramManager.setUser(dcId, user.id, true);
             wavegramManager.addLoggedInDcId(dcId);
           }
         }
         updateScheduledFuture = scheduledExecutorService.scheduleAtFixedRate(() -> {
-          executeRpc(new ApiScheme.updates_ns.getState());
+          executeRpc(new ApiScheme.updates.getState());
         }, UPDATE_DELAY_MIN, UPDATE_DELAY_MIN, TimeUnit.MINUTES);
       }
     }));
@@ -1534,15 +1534,15 @@ public class WavegramClient extends MTProtoClient {
     authorization.bot_auth_token = botToken;
 
     return executeRpc(authorization, RpcOptions.build().callback((object) -> {
-      if (object instanceof ApiScheme.auth.authorization_ authorization2) {
-        if (authorization2.user instanceof ApiScheme.user_ user) {
+      if (object instanceof ApiScheme.auth.authorization authorization2) {
+        if (authorization2.user instanceof ApiScheme.user user) {
           if (wavegramManager != null) {
             wavegramManager.setUser(dcId, user.id, false);
             wavegramManager.addLoggedInDcId(dcId);
           }
         }
         updateScheduledFuture = scheduledExecutorService.scheduleAtFixedRate(() -> {
-          executeRpc(new ApiScheme.updates_ns.getState());
+          executeRpc(new ApiScheme.updates.getState());
         }, UPDATE_DELAY_MIN, UPDATE_DELAY_MIN, TimeUnit.MINUTES);
       }
       onMessage.object(object);
@@ -1551,7 +1551,7 @@ public class WavegramClient extends MTProtoClient {
 
   public Future<TLObject> getCdnConfig() {
     return executeRpc(new ApiScheme.help.getCdnConfig(), RpcOptions.build().callback(object -> {
-      if (object instanceof ApiScheme.cdnConfig_ config2) {
+      if (object instanceof ApiScheme.cdnConfig config2) {
         WavegramClient.this.cdnConfig = config2;
       }
     }));
@@ -1560,7 +1560,7 @@ public class WavegramClient extends MTProtoClient {
   public List<MTDcOption> getCdnDcs() {
     if (config == null) {
       Future<TLObject> future = executeRpc(new ApiScheme.help.getConfig(), RpcOptions.build().callback(object -> {
-        if (object instanceof ApiScheme.config_ config2) {
+        if (object instanceof ApiScheme.config config2) {
           WavegramClient.this.config = config2;
         }
       }));
@@ -1571,15 +1571,15 @@ public class WavegramClient extends MTProtoClient {
       }
     }
     List<MTDcOption> dcOptionsList = new ArrayList<>();
-    List<ApiScheme.DcOption> dcOptions = config.dc_options.stream().filter((dcOption -> {
-      if (dcOption instanceof ApiScheme.dcOption_ dcOption2) {
+    List<ApiScheme.DcOptionType> dcOptions = config.dc_options.stream().filter((dcOption -> {
+      if (dcOption instanceof ApiScheme.dcOption dcOption2) {
         return dcOption2.cdn;
       }
       return false;
     })).toList();
 
-    for (ApiScheme.DcOption dcOption : dcOptions) {
-      if (dcOption instanceof ApiScheme.dcOption_ dcOption2) {
+    for (ApiScheme.DcOptionType dcOption : dcOptions) {
+      if (dcOption instanceof ApiScheme.dcOption dcOption2) {
         try {
           TLOutputStream ostream = new TLOutputStream();
           dcOption2.write(ostream);
@@ -1604,8 +1604,8 @@ public class WavegramClient extends MTProtoClient {
       }
     }
     if (cdnConfig != null) {
-      for (ApiScheme.CdnPublicKey cdnPublicKey : cdnConfig.public_keys) {
-        if (cdnPublicKey instanceof ApiScheme.cdnPublicKey_ cdnPublicKey2) {
+      for (ApiScheme.CdnPublicKeyType cdnPublicKey : cdnConfig.public_keys) {
+        if (cdnPublicKey instanceof ApiScheme.cdnPublicKey cdnPublicKey2) {
           rsaKeys.add(new RSA(cdnPublicKey2.public_key));
         }
       }
@@ -1625,7 +1625,7 @@ public class WavegramClient extends MTProtoClient {
     return wavegramDownloader;
   }
 
-  public void download(ApiScheme.MessageMedia messageMedia) {
+  public void download(ApiScheme.MessageMediaType messageMedia) {
     wavegramDownloader.download(messageMedia);
   }
 
@@ -1654,7 +1654,7 @@ public class WavegramClient extends MTProtoClient {
     }
     ApiScheme.auth.logOut logOut = new ApiScheme.auth.logOut();
     executeRpc(logOut, RpcOptions.build().callback(object -> {
-      if (object instanceof ApiScheme.auth.loggedOut_) {
+      if (object instanceof ApiScheme.auth.loggedOut) {
         if (wavegramManager != null) {
           wavegramManager.removeUser();
         }

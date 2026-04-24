@@ -98,23 +98,23 @@ public class Main {
     wavegramClient.onMessage(object -> {
       //ApiScheme.Updates responses
       if (object instanceof ApiScheme.updates_ updates) {
-        for (ApiScheme.Update update : updates.updates) {
+        for (ApiScheme.UpdateType update : updates.updates) {
           if (update instanceof ApiScheme.updateNewMessage updateNewMessage &&
-            updateNewMessage.message instanceof ApiScheme.message_ message) {
+            updateNewMessage.message instanceof ApiScheme.message message) {
             wavegramClient.download(message.media);
           }
         }
       }
-    }, ApiScheme.Updates.class);
+    }, ApiScheme.UpdatesType.class);
 
     wavegramClient.onSecretMessage(new WavegramClient.SecretMessageCallback() {
       @Override
-      public void onStart(ApiScheme.EncryptedChat encryptedChat) {
+      public void onStart(ApiScheme.EncryptedChatType encryptedChat) {
         System.out.println(TAG + ".onStart: SecretMessageCallback " + encryptedChat);
       }
 
       @Override
-      public void onMessage(ApiScheme.EncryptedMessage encryptedMessage, ApiSecretScheme.DecryptedMessage decryptedMessage) {
+      public void onMessage(ApiScheme.EncryptedMessageType encryptedMessage, ApiSecretScheme.DecryptedMessage decryptedMessage) {
         System.out.println(TAG + ".onMessage: SecretMessageCallback " + encryptedMessage + " " + decryptedMessage);
       }
 
@@ -176,7 +176,7 @@ public class Main {
           inputFileBig.name = "Test";
           uploadedDocument.file = inputFileBig;
         } else {
-          ApiScheme.inputFile_ inputFile = new ApiScheme.inputFile_();
+          ApiScheme.inputFile inputFile = new ApiScheme.inputFile();
           inputFile.id = uploadFile.fileId;
           inputFile.parts = uploadFile.fileTotalParts;
           inputFile.name = "Test";
@@ -199,14 +199,14 @@ public class Main {
       System.out.print(TAG + ".main: Enter phone number: ");
       String phoneNumber = new Scanner(System.in).nextLine();
       wavegramClient.sendCode(phoneNumber, object -> {
-        if (object instanceof ApiScheme.auth.sentCode_ sentCode) {
+        if (object instanceof ApiScheme.auth.sentCode sentCode) {
           while (true) {
             System.out.print(TAG + ".main: Enter phone code: ");
             String phoneCode = new Scanner(System.in).nextLine();
             try {
               TLObject authorization = wavegramClient.signIn(phoneNumber, sentCode.phone_code_hash, phoneCode).get();
-              if (authorization instanceof ApiScheme.auth.authorization_ authorization2) {
-                if (authorization2.user instanceof ApiScheme.user_ user) {
+              if (authorization instanceof ApiScheme.auth.authorization authorization2) {
+                if (authorization2.user instanceof ApiScheme.user user) {
                   System.out.println(TAG + ".main: You are logged in as " + user.first_name + " " + user.last_name + " (" + user.username + ")");
                 }
                 break;
