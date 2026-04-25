@@ -79,7 +79,8 @@ public class Main {
       public void onMessage(TLObject object) {
         //All responses
         if (object instanceof MTProtoScheme.rpc_result rpcResult && rpcResult.result instanceof MTProtoScheme.rpc_error rpcError) {
-          System.err.println(TAG + ".object: " + ApiError.getDescription(rpcError.error_message));
+          String description = ApiError.getDescription(rpcError.error_message);
+          System.err.println(TAG + ".onMessage: " + (description != null ? description : rpcError.error_message));
         }
       }
 
@@ -96,7 +97,7 @@ public class Main {
     });
 
     wavegramClient.onMessage(object -> {
-      //ApiScheme.Updates responses
+      //ApiScheme.UpdatesType responses
       if (object instanceof ApiScheme.updates_ updates) {
         for (ApiScheme.UpdateType update : updates.updates) {
           if (update instanceof ApiScheme.updateNewMessage updateNewMessage &&

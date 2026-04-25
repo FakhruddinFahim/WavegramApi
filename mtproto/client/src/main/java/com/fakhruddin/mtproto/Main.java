@@ -4,10 +4,10 @@ import com.fakhruddin.mtproto.client.*;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLContext;
 import com.fakhruddin.mtproto.tl.TLObject;
-import com.fakhruddin.mtproto.utils.CryptoUtils;
 import com.fakhruddin.mtproto.utils.Logger;
 
 import java.io.FileOutputStream;
+import java.util.concurrent.ExecutionException;
 
 public class Main {
   private static final String TAG = Main.class.getSimpleName();
@@ -72,8 +72,10 @@ public class Main {
     RpcFuture future = client.executeRpc(ping);
     try {
       TLObject ignored = future.get();
-    } catch (RpcException e) {
-      //e.getRpcError();
+    } catch (ExecutionException e) {
+      if (e.getCause() instanceof RpcException rpcException) {
+        //rpcException.getRpcError();
+      }
     } catch (Exception ignored) {
     }
 

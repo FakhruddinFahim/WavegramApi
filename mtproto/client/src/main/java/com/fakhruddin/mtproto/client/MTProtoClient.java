@@ -66,6 +66,7 @@ public class MTProtoClient extends TcpSocket {
   private int reconnectLimit = -1;
   private int reconnectAttemptCount = 0;
   public boolean isInited = false;
+  public boolean tempSession = false;
   /**
    * temp auth key expire time in second
    */
@@ -82,7 +83,7 @@ public class MTProtoClient extends TcpSocket {
   public boolean useIpv6 = false;
 
   public static class MessageInfo {
-    public CompletableFuture<TLObject> future = new CompletableFuture<>();
+    public RpcFuture future = new RpcFuture();
     public ScheduledFuture<?> timeoutTask = null;
     public RpcOptions options = new RpcOptions();
     public MTMessage message;
@@ -192,7 +193,7 @@ public class MTProtoClient extends TcpSocket {
     if (dcOption == null) {
       throw new RuntimeException("No dc option found for id: " + dcId);
     }
-    if (clientManager != null) {
+    if (clientManager != null && !tempSession) {
       clientManager.setDcId(dcId);
     }
 
@@ -258,7 +259,7 @@ public class MTProtoClient extends TcpSocket {
       }
       protocol.writeTag(outputStream);
       if (clientManager != null && (authKey = clientManager.getAuthKey(dcId, AuthKey.Type.PERM_AUTH_KEY)) != null) {
-        MTSession tempSession = clientManager.getSession(dcId);
+        MTSession tempSession = this.tempSession ? null : clientManager.getSession(dcId);
         if (tempSession == null) {
           session.sessionId = CryptoUtils.randomLong();
         } else {
@@ -339,9 +340,10 @@ public class MTProtoClient extends TcpSocket {
           }
         }
 
-        if (new TLInputStream(message.messageData).readInt() == MTProtoScheme.msg_container.ID) {
+        TLInputStream objectInputStream = new TLInputStream(message.messageData);
+        if (objectInputStream.readInt() == MTProtoScheme.msg_container.ID) {
           MTProtoScheme.msg_container container = new MTProtoScheme.msg_container();
-          container.read(new TLInputStream(message.messageData), context);
+          container.readParams(objectInputStream, context);
           if (!recvMessages.containsKey(message.messageId) && recvMessages.keySet().stream().findFirst().orElse(0L) < message.messageId) {
             for (MTMessage item : container.messages) {
               if (!recvMessages.containsKey(item.messageId) && recvMessages.keySet().stream().findFirst().orElse(0L) < item.messageId) {
@@ -350,12 +352,12 @@ public class MTProtoClient extends TcpSocket {
                 recvMessages.put(item.messageId, item);
                 onMessage(item);
               } else {
-                Logger.logger.logw("msgId exists or lower than all stored msgs, ignored msg: " + item + " older msg: " + recvMessages.get(item.messageId) + ", object: " + TLContext.read(item.messageData) + "\n");
+                Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + item + "\n\tolder msg: " + recvMessages.get(item.messageId) + "\n\tobject: " + TLContext.read(item.messageData) + "\n");
               }
             }
             recvMessages.put(message.messageId, message);
           } else {
-            Logger.logger.logw("msgId exists or lower than all stored msgs, ignored msg: " + message + " older msg: " + recvMessages.get(message.messageId) + ", object: " + TLContext.read(message.messageData) + "\n");
+            Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + message + "\n\tolder msg: " + recvMessages.get(message.messageId) + "\n\tobject: " + TLContext.read(message.messageData) + "\n");
           }
 
         } else {
@@ -368,7 +370,7 @@ public class MTProtoClient extends TcpSocket {
         }
         if (message.authKeyId != 0) {
           session.peerLastSeqNo = message.seqNo;
-          if (clientManager != null) {
+          if (clientManager != null && !tempSession) {
             clientManager.setSession(dcId, session);
           }
         }
@@ -528,8 +530,10 @@ public class MTProtoClient extends TcpSocket {
             session.getCurrentSalt().salt = newSessionCreated.server_salt;
           }
           if (clientManager != null) {
-            clientManager.setSession(dcId, session);
             clientManager.setSalts(dcId, session.futureSalts);
+            if (!tempSession) {
+              clientManager.setSession(dcId, session);
+            }
           }
           onInit();
           onSessionCreated(newSessionCreated);
@@ -1135,8 +1139,10 @@ public class MTProtoClient extends TcpSocket {
         tempAuthKey.expireAt = (int) (session.getServerTime() / 1000) + p_q_inner_data_temp_dc.expires_in;
         if (clientManager != null) {
           clientManager.setAuthKey(dcId, tempAuthKey);
-          clientManager.setSession(dcId, session);
           clientManager.setSalts(dcId, session.futureSalts);
+          if (!tempSession) {
+            clientManager.setSession(dcId, session);
+          }
         }
         scheduleSaltUpdate();
         tempAuthScheduleFuture = scheduledExecutor.schedule(this::createTempAuthKey, tempAuthKeyExpire - 60, TimeUnit.SECONDS);
@@ -1162,8 +1168,10 @@ public class MTProtoClient extends TcpSocket {
         authKey.setType(AuthKey.Type.PERM_AUTH_KEY);
         if (clientManager != null) {
           clientManager.setAuthKey(dcId, authKey);
-          clientManager.setSession(dcId, session);
           clientManager.setSalts(dcId, session.futureSalts);
+          if (!tempSession) {
+            clientManager.setSession(dcId, session);
+          }
         }
         if (protoCallback != null) {
           protoCallback.onAuthCreated(AuthKey.Type.PERM_AUTH_KEY);
@@ -1302,9 +1310,9 @@ public class MTProtoClient extends TcpSocket {
         if (options.size() > i && options.get(i).callback != null) {
           options.get(i).callback.object(rpcError);
         }
-        CompletableFuture<TLObject> future = new CompletableFuture<>();
+        RpcFuture future = new RpcFuture();
         future.completeExceptionally(new RpcException(rpcError));
-        futures.add(new RpcFuture(future));
+        futures.add(future);
       }
       return futures;
     }
@@ -1356,7 +1364,8 @@ public class MTProtoClient extends TcpSocket {
             rpcTimeoutCallback(item.message.messageId);
           }, item.options.timeout, TimeUnit.MILLISECONDS);
         }
-        futures.add(new RpcFuture(item.future, item.message.messageId));
+        item.future.reqMsgId = item.message.messageId;
+        futures.add(item.future.copy());
       }
 
 
@@ -1447,7 +1456,7 @@ public class MTProtoClient extends TcpSocket {
           }, this.pingDelay, TimeUnit.SECONDS);
         }
 
-        if (clientManager != null) {
+        if (clientManager != null && !tempSession) {
           clientManager.setSession(dcId, session);
         }
 
