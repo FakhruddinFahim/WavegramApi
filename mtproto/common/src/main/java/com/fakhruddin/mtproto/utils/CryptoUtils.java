@@ -83,32 +83,22 @@ public final class CryptoUtils {
     return reverse;
   }
 
-  public static byte[] AES256CTRDecrypt(byte[] src, byte[] aesKey, byte[] aesIv) {
-    try {
-      Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
-      SecretKeySpec key = new SecretKeySpec(aesKey, "AES");
-      IvParameterSpec ivSpec = new IvParameterSpec(aesIv);
-      cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
-      return cipher.doFinal(src);
-    } catch (NoSuchAlgorithmException | InvalidKeyException | BadPaddingException |
-             InvalidAlgorithmParameterException | IllegalBlockSizeException | NoSuchPaddingException e) {
-      e.printStackTrace();
-    }
-    return null;
+  public static byte[] AES256CTRDecrypt(byte[] src, byte[] aesKey, byte[] aesIv) throws NoSuchPaddingException,
+    NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+    Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
+    SecretKeySpec key = new SecretKeySpec(aesKey, "AES");
+    IvParameterSpec ivSpec = new IvParameterSpec(aesIv);
+    cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
+    return cipher.doFinal(src);
   }
 
-  public static byte[] AES256CTREncrypt(byte[] src, byte[] aesKey, byte[] aesIv) {
-    try {
-      Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
-      SecretKeySpec key = new SecretKeySpec(aesKey, "AES");
-      IvParameterSpec ivSpec = new IvParameterSpec(aesIv);
-      cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
-      return cipher.doFinal(src);
-    } catch (NoSuchAlgorithmException | InvalidKeyException | BadPaddingException |
-             InvalidAlgorithmParameterException | IllegalBlockSizeException | NoSuchPaddingException e) {
-      e.printStackTrace();
-    }
-    return null;
+  public static byte[] AES256CTREncrypt(byte[] src, byte[] aesKey, byte[] aesIv) throws NoSuchPaddingException,
+    NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+    Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
+    SecretKeySpec key = new SecretKeySpec(aesKey, "AES");
+    IvParameterSpec ivSpec = new IvParameterSpec(aesIv);
+    cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
+    return cipher.doFinal(src);
   }
 
   public static byte[] AES256ECBEncrypt(byte[] src, byte[] aesKey) {

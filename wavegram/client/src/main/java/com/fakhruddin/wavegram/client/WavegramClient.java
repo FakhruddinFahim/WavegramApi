@@ -138,29 +138,19 @@ public class WavegramClient extends MTProtoClient {
     CompletableFuture<TLObject> future = new CompletableFuture<>();
     MTProtoScheme.rpc_error rpcError = new MTProtoScheme.rpc_error();
     rpcError.error_code = -1;
-    if (wavegramManager != null && wavegramManager.getUserId() != -1) {
-      if (wavegramManager.getDcId() != dcId) {
-        int[] loggedInDcs = wavegramManager.getLoggedInDcs();
-        if (loggedInDcs != null) {
-          if (Arrays.stream(loggedInDcs).allMatch(i -> i != dcId)) {
-            ApiScheme.auth.exportAuthorization exportAuthorization = new ApiScheme.auth.exportAuthorization();
-            exportAuthorization.dc_id = dcId;
-            return executeRpc(exportAuthorization);
-          } else {
-            rpcError.error_message = "LOGGED_IN_THIS_DC";
-            future.complete(rpcError);
-          }
-        } else {
-          rpcError.error_message = "USER_NOT_LOGGED_IN";
-          future.complete(rpcError);
-        }
+    int[] loggedInDcs = wavegramManager.getLoggedInDcs();
+    if (wavegramManager != null && wavegramManager.getUserId() != -1 && loggedInDcs != null) {
+      if (wavegramManager.getDcId() != dcId && Arrays.stream(loggedInDcs).allMatch(i -> i != dcId)) {
+        ApiScheme.auth.exportAuthorization exportAuthorization = new ApiScheme.auth.exportAuthorization();
+        exportAuthorization.dc_id = dcId;
+        return executeRpc(exportAuthorization);
       } else {
-        rpcError.error_message = "SAME_DC";
-        future.complete(rpcError);
+        rpcError.error_message = "LOGGED_IN_THIS_DC";
+        future.completeExceptionally(new RpcException(rpcError));
       }
     } else {
       rpcError.error_message = "USER_NOT_LOGGED_IN";
-      future.complete(rpcError);
+      future.completeExceptionally(new RpcException(rpcError));
     }
     return future;
   }
@@ -1362,7 +1352,7 @@ public class WavegramClient extends MTProtoClient {
     inputEncryptedFileLocation.access_hash = encryptedFile2.access_hash;
 
     String filename = "" + encryptedFile2.id;
-    byte[] key = null, iv = null;
+    byte[] key, iv;
     if (decryptedMessageMedia instanceof ApiSecretScheme.DecryptedMessageMediaDocument143 document143) {
       key = document143.key;
       iv = document143.iv;
@@ -1401,59 +1391,34 @@ public class WavegramClient extends MTProtoClient {
       key = photo45.key;
       iv = photo45.iv;
       filename += ".jpeg";
-    } else if (decryptedMessageMedia instanceof ApiSecretScheme.DecryptedMessageMediaExternalDocument23 externalDocument23) {
+    } else {
+      iv = null;
+      key = null;
+      if (decryptedMessageMedia instanceof ApiSecretScheme.DecryptedMessageMediaExternalDocument23 externalDocument23) {
 
+      }
     }
 
-    WavegramDownloader wavegramDownloader1 = new WavegramDownloader(this);
-    wavegramDownloader1.setDownloadManager(wavegramDownloader.getDownloadManager());
-    byte[] finalIv = iv;
-    byte[] finalKey = key;
+    CompletableFuture<WavegramDownloader.DownloadFile> downloadFileFuture = wavegramDownloader.download(
+      inputEncryptedFileLocation, encryptedFile2.dc_id, 1024 * 1024, 0, encryptedFile2.size,
+      wavegramDownloader.getRootPath() + filename + "-enc", true
+    );
+
     String finalFilename = filename;
-    wavegramDownloader1.onDownload(new DownloadCallback() {
-      @Override
-      public void onStart(long fileId, WavegramDownloader.DownloadFile downloadFile) {
-        if (wavegramDownloader.getDownloadCallback() != null) {
-          wavegramDownloader.getDownloadCallback().onStart(fileId, downloadFile);
-        }
-      }
-
-      @Override
-      public void onProgress(long fileId, long offset, long bytesDownloaded, byte[] buffer, long totalBytesDownloaded) {
-        if (wavegramDownloader.getDownloadCallback() != null) {
-          wavegramDownloader.getDownloadCallback().onProgress(fileId, offset, bytesDownloaded, buffer, totalBytesDownloaded);
-        }
-      }
-
-      @Override
-      public void onComplete(long fileId, WavegramDownloader.DownloadFile downloadFile) {
+    downloadFileFuture.whenComplete((file, t) -> {
+      if (file != null) {
         try {
-          FileInputStream fileInputStream = new FileInputStream(downloadFile.filepath);
+          FileInputStream fileInputStream = new FileInputStream(file.filepath);
           FileOutputStream fileOutputStream = new FileOutputStream(
             wavegramDownloader.getRootPath() + finalFilename, false);
           CryptoUtils.AES256IGEDecrypt(fileInputStream, fileOutputStream,
-            finalIv, finalKey);
-          Files.delete(Path.of(downloadFile.filepath));
-        } catch (IOException e) {
+            iv, key);
+          Files.delete(Path.of(file.filepath));
+        } catch (Exception e) {
           throw new RuntimeException(e);
-        }
-
-        if (wavegramDownloader.getDownloadCallback() != null) {
-          wavegramDownloader.getDownloadCallback().onComplete(fileId, downloadFile);
-        }
-      }
-
-      @Override
-      public void onError(long fileId, MTProtoScheme.rpc_error rpcError) {
-        if (wavegramDownloader.getDownloadCallback() != null) {
-          wavegramDownloader.getDownloadCallback().onError(fileId, rpcError);
         }
       }
     });
-
-    wavegramDownloader1.download(inputEncryptedFileLocation, encryptedFile2.dc_id, 1024 * 1024,
-      0, encryptedFile2.size, wavegramDownloader.getRootPath() + filename + "-enc",
-      true);
   }
 
   public void onSecretMessage(SecretMessageCallback secretMessageCallback) {

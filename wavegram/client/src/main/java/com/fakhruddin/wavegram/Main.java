@@ -52,27 +52,22 @@ public class Main {
     wavegramClient.setProtoCallback(new ProtoCallback() {
       @Override
       public void onStart() {
-        System.out.println(TAG + ".onStart: called");
       }
 
       @Override
       public void onSessionCreated(MTProtoScheme.new_session_created sessionCreated) {
-        System.out.println(TAG + ".onSessionCreated: called");
       }
 
       @Override
       public void onSessionDestroyed(long sessionId) {
-        System.out.println(TAG + ".onSessionDestroyed: " + sessionId);
       }
 
       @Override
       public void onAuthCreated(AuthKey.Type type) {
-        System.out.println(TAG + ".onAuthCreated: called");
       }
 
       @Override
       public void onAuthDestroyed(AuthKey.Type type) {
-        System.out.println(TAG + ".onAuthDestroyed: called");
       }
 
       @Override
@@ -91,8 +86,6 @@ public class Main {
 
       @Override
       public void onClose() {
-        System.out.println(TAG + ".onClose: called" +
-          (wavegramClient.isReconnecting() ? ", reconnecting..." : ""));
       }
     });
 
@@ -126,23 +119,19 @@ public class Main {
     });
     wavegramClient.onDownload(new DownloadCallback() {
       @Override
-      public void onStart(long fileId, WavegramDownloader.DownloadFile downloadFile) {
-        System.out.println(TAG + ".onStart: " + fileId + " " + downloadFile);
+      public void onStart(WavegramDownloader.DownloadFile downloadFile) {
       }
 
       @Override
-      public void onProgress(long fileId, long offset, long bytesDownloaded, byte[] buffer, long totalBytesDownloaded) {
-        System.out.println(TAG + ".onProgress: " + fileId + " " + offset + " " + bytesDownloaded + " " + totalBytesDownloaded);
+      public void onProgress(WavegramDownloader.DownloadFile downloadFile, long offset, long bytesDownloaded, byte[] buffer, long totalBytesDownloaded) {
       }
 
       @Override
-      public void onComplete(long fileId, WavegramDownloader.DownloadFile downloadFile) {
-        System.out.println(TAG + ".onComplete: " + fileId + " " + downloadFile);
+      public void onComplete(WavegramDownloader.DownloadFile downloadFile) {
       }
 
       @Override
-      public void onError(long fileId, MTProtoScheme.rpc_error rpcError) {
-        System.err.println(TAG + ".onError: " + fileId + " " + rpcError);
+      public void onError(WavegramDownloader.DownloadFile downloadFile, MTProtoScheme.rpc_error rpcError) {
       }
 
     });

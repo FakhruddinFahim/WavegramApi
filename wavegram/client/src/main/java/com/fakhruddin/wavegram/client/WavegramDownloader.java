@@ -1,28 +1,19 @@
 package com.fakhruddin.wavegram.client;
 
-import com.fakhruddin.mtproto.AuthKey;
 import com.fakhruddin.mtproto.MTDcOption;
-import com.fakhruddin.mtproto.MTSession;
 import com.fakhruddin.mtproto.client.*;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLObject;
 import com.fakhruddin.mtproto.tl.TLOutputStream;
-import com.fakhruddin.mtproto.tl.TLVector;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
-import com.fakhruddin.wavegram.Config;
-import com.fakhruddin.wavegram.tl.ApiError;
+import com.fakhruddin.mtproto.utils.Logger;
 import com.fakhruddin.wavegram.tl.ApiScheme;
 
-import java.io.IOException;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -40,83 +31,9 @@ public class WavegramDownloader {
   int parallelDownloadLimit = 2;
   int threadPerDownload = 2;
   private final Map<Long, List<MTProtoClient>> protoClients = new HashMap<>();
-  private final Map<Long, Future<?>> futures = new HashMap<>();
-  private final List<DownloadFile> downloadFiles = new ArrayList<>();
+  private final Map<Long, DownloadFile> downloadFiles = Collections.synchronizedMap(new LinkedHashMap<>());
   private final Map<Long, ExecutorService> downloadExecutorServiceMap = new HashMap<>();
   private String rootPath = "";
-
-  private static class DownloadClientManager extends ClientManager {
-    private final DownloadFile downloadFile;
-
-    private final ClientManager clientManager;
-
-    public DownloadClientManager(DownloadFile downloadFile, ClientManager clientManager) {
-      this.downloadFile = downloadFile;
-      this.clientManager = clientManager;
-    }
-
-    @Override
-    public void setDcId(int dcId) {
-      this.downloadFile.dcId = dcId;
-    }
-
-    @Override
-    public int getDcId() {
-      return this.downloadFile.dcId;
-    }
-
-    @Override
-    public AuthKey getAuthKey(int dcId, AuthKey.Type type) {
-      if (clientManager != null) {
-        return clientManager.getAuthKey(dcId, type);
-      }
-      return null;
-    }
-
-    @Override
-    public void setAuthKey(int dcId, AuthKey authKey) {
-      if (clientManager != null) {
-        clientManager.setAuthKey(dcId, authKey);
-      }
-    }
-
-    @Override
-    public void deleteAuthKey(int dcId, AuthKey.Type type) {
-      if (clientManager != null) {
-        clientManager.deleteAuthKey(dcId, type);
-      }
-    }
-
-    @Override
-    public void setSession(int dcId, MTSession session) {
-
-    }
-
-    @Override
-    public MTSession getSession(int dcId) {
-      return null;
-    }
-
-    @Override
-    public void deleteSession(int dcId) {
-
-    }
-
-    @Override
-    public List<MTProtoScheme.future_salt> getSalts(int dcId) {
-      if (clientManager != null) {
-        return clientManager.getSalts(dcId);
-      }
-      return new ArrayList<>();
-    }
-
-    @Override
-    public void setSalts(int dcId, List<MTProtoScheme.future_salt> futureSalts) {
-      if (clientManager != null) {
-        clientManager.setSalts(dcId, futureSalts);
-      }
-    }
-  }
 
   public static class DownloadFile {
     public static int FILE_QUEUE = 0;
@@ -134,6 +51,7 @@ public class WavegramDownloader {
     public long downloadedSize = 0;
     public ApiScheme.InputFileLocationType inputFileLocation;
     public Map<Integer, Long[]> downloadedParts = new HashMap<>();
+    private Future<?> future = null;
 
     @Override
     public String toString() {
@@ -195,32 +113,30 @@ public class WavegramDownloader {
     this.downloadCallback = downloadCallback;
   }
 
-  public void download(ApiScheme.MessageMediaType messageMedia) {
+  public CompletableFuture<DownloadFile> download(ApiScheme.MessageMediaType messageMedia) {
     ApiScheme.InputFileLocationType inputFileLocation = null;
     long fileSize = 0;
     String filename = null;
     int dcId = 0;
     if (messageMedia instanceof ApiScheme.messageMediaDocument messageMediaDocument) {
-      if (messageMediaDocument.document instanceof ApiScheme.document document2) {
+      if (messageMediaDocument.document instanceof ApiScheme.document document) {
         ApiScheme.inputDocumentFileLocation location = new ApiScheme.inputDocumentFileLocation();
-        location.file_reference = document2.file_reference;
-        location.access_hash = document2.access_hash;
-        location.id = document2.id;
+        location.file_reference = document.file_reference;
+        location.access_hash = document.access_hash;
+        location.id = document.id;
         location.thumb_size = "";
-        dcId = document2.dc_id;
+        dcId = document.dc_id;
         inputFileLocation = location;
-        if (filename == null) {
-          for (ApiScheme.DocumentAttributeType documentAttribute : document2.attributes) {
-            if (documentAttribute instanceof ApiScheme.documentAttributeFilename documentAttributeFilename) {
-              filename = documentAttributeFilename.file_name;
-              break;
-            }
-          }
-          if (filename == null) {
-            filename = location.id + "." + document2.mime_type.substring(document2.mime_type.indexOf("/") + 1);
+        for (ApiScheme.DocumentAttributeType documentAttribute : document.attributes) {
+          if (documentAttribute instanceof ApiScheme.documentAttributeFilename documentAttributeFilename) {
+            filename = documentAttributeFilename.file_name;
+            break;
           }
         }
-        fileSize = document2.size;
+        if (filename == null) {
+          filename = location.id + "." + document.mime_type.substring(document.mime_type.indexOf("/") + 1);
+        }
+        fileSize = document.size;
       }
     } else if (messageMedia instanceof ApiScheme.messageMediaPhoto messageMediaPhoto) {
       if (messageMediaPhoto.photo instanceof ApiScheme.photo photo) {
@@ -229,13 +145,13 @@ public class WavegramDownloader {
         photoFileLocation.access_hash = photo.access_hash;
         photoFileLocation.id = photo.id;
         dcId = photo.dc_id;
-        ApiScheme.PhotoSizeType photoSize = photo.sizes.get(photo.sizes.size() - 1);
+        ApiScheme.PhotoSizeType photoSize = photo.sizes.getLast();
         if (photoSize instanceof ApiScheme.photoSize photoSize2) {
           photoFileLocation.thumb_size = photoSize2.type;
           fileSize = photoSize2.size;
         } else if (photoSize instanceof ApiScheme.photoSizeProgressive photoSizeProgressive) {
           photoFileLocation.thumb_size = photoSizeProgressive.type;
-          fileSize = photoSizeProgressive.sizes.get(photoSizeProgressive.sizes.size() - 1);
+          fileSize = photoSizeProgressive.sizes.getLast();
         } else if (photoSize instanceof ApiScheme.photoStrippedSize photoStrippedSize) {
           photoFileLocation.thumb_size = photoStrippedSize.type;
         } else if (photoSize instanceof ApiScheme.photoCachedSize photoCachedSize) {
@@ -244,457 +160,99 @@ public class WavegramDownloader {
 
         }
         inputFileLocation = photoFileLocation;
-        if (filename == null) {
-          filename = photoFileLocation.id + ".jpg";
-        }
+        filename = photoFileLocation.id + ".jpg";
       }
     } else {
-      System.err.println(TAG + ".download: can't download, unsupported message");
-      return;
+      Logger.logger.loge("can't download, unsupported message\n");
+      CompletableFuture<DownloadFile> future = new CompletableFuture<>();
+      future.completeExceptionally(new RpcException(-1, "UNSUPPORTED_MESSAGE"));
+      return future;
     }
 
-    download(inputFileLocation, dcId, 1024 * 1024, 0, fileSize, rootPath + filename, false);
-
+    return download(inputFileLocation, dcId, 1024 * 1024, 0, fileSize, rootPath + filename, false);
   }
 
-  public void download(ApiScheme.InputFileLocationType inputFileLocation, int dcId, long partSize, long offset,
-                       long size, OutputStream outputStream, boolean stream) {
-    if (executorService == null || executorService.isTerminated()) {
-      executorService = Executors.newFixedThreadPool(parallelDownloadLimit);
-    }
+  public CompletableFuture<DownloadFile> download(ApiScheme.InputFileLocationType inputFileLocation, int dcId, long partSize, long offset,
+                                                  long size, OutputStream outputStream, boolean stream) {
     DownloadFile downloadFile = new DownloadFile();
-    downloadFile.partSize = partSize;
-    downloadFile.size = size;
-    downloadFile.offset = offset;
-    if (inputFileLocation instanceof ApiScheme.inputDocumentFileLocation inputDocumentFileLocation) {
-      downloadFile.fileId = inputDocumentFileLocation.id;
-    } else if (inputFileLocation instanceof ApiScheme.inputPhotoFileLocation inputPhotoFileLocation) {
-      downloadFile.fileId = inputPhotoFileLocation.id;
-    } else if (inputFileLocation instanceof ApiScheme.inputEncryptedFileLocation inputEncryptedFileLocation) {
-      downloadFile.fileId = inputEncryptedFileLocation.id;
-    } else if (inputFileLocation instanceof ApiScheme.inputPeerPhotoFileLocation inputPeerPhotoFileLocation) {
-      downloadFile.fileId = inputPeerPhotoFileLocation.photo_id;
-    } else if (inputFileLocation instanceof ApiScheme.inputSecureFileLocation inputSecureFileLocation) {
-      downloadFile.fileId = inputSecureFileLocation.id;
-    }
-
-    downloadFile.dcId = dcId;
     downloadFile.inputFileLocation = inputFileLocation;
-
-    if (downloadManager != null && !stream) {
-      DownloadFile downloadFile1 = downloadManager.getFile(downloadFile.fileId);
-      if (downloadFile1 != null) {
-        downloadFile.downloadedSize = downloadFile1.downloadedSize;
-        downloadFile.downloadedParts = downloadFile1.downloadedParts;
-      } else {
-        downloadManager.addFile(downloadFile);
-      }
-    }
-    downloadFiles.add(downloadFile);
-
-    Future<?> future = executorService.submit(() -> {
-      try {
-        downloadFile.state = DownloadFile.FILE_DOWNLOADING;
-        if (downloadCallback != null) {
-          downloadCallback.onStart(downloadFile.fileId, downloadFile);
-        }
-
-        AtomicReference<CountDownLatch> countDownLatch = new AtomicReference<>(new CountDownLatch(1));
-        boolean needInit = true;
-        AtomicReference<ApiScheme.upload.fileCdnRedirect> fileCdnRedirect = new AtomicReference<>(null);
-        MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
-        protoClient.context = wavegramClient.context;
-        protoClient.setClientManager(new DownloadClientManager(downloadFile,
-          wavegramClient.getClientManager()));
-        if (fileCdnRedirect.get() != null) {
-          List<MTDcOption> dcOptions = wavegramClient.getDcOptions();
-          dcOptions.addAll(wavegramClient.getCdnDcs());
-          protoClient.setDcOptions(dcOptions);
-          protoClient.rsaPublicRsaKeys = wavegramClient.getCdnRsaKeys();
-        } else {
-          protoClient.rsaPublicRsaKeys = Config.RSA_PUBLIC_KEYS;
-        }
-        protoClient.setProtoCallback(new ProtoCallback() {
-          @Override
-          public void onStart() {
-            countDownLatch.get().countDown();
-          }
-
-          @Override
-          public void onSessionCreated(MTProtoScheme.new_session_created sessionCreated) {
-            countDownLatch.get().countDown();
-          }
-
-          @Override
-          public void onSessionDestroyed(long sessionId) {
-
-          }
-
-          @Override
-          public void onAuthCreated(AuthKey.Type type) {
-
-          }
-
-          @Override
-          public void onAuthDestroyed(AuthKey.Type type) {
-
-          }
-
-          @Override
-          public void onMessage(TLObject object) {
-            System.out.println(TAG + ".onMessage: " + object);
-            if (object instanceof MTProtoScheme.rpc_result rpcResult && rpcResult.result instanceof MTProtoScheme.rpc_error rpcError) {
-              System.err.println(TAG + ".object: " + ApiError.getDescription(rpcError.error_message));
-            }
-          }
-
-          @Override
-          public void onTransportError(TransportError error) {
-            System.err.println(TAG + ".onTransportError: " + error);
-            if (error == TransportError.AUTH_KEY_NOT_FOUND && wavegramClient.getWavegramManager() != null) {
-              wavegramClient.getWavegramManager().removeLoggedInDcId(dcId);
-            }
-          }
-
-          @Override
-          public void onClose() {
-            System.out.println(TAG + ".onClose: called " + " " + downloadFile.fileId);
-          }
-        });
-        protoClient.dcId = downloadFile.dcId;
-        protoClient.start();
-
-        if (protoClients.containsKey(downloadFile.fileId)) {
-          protoClients.get(downloadFile.fileId).add(protoClient);
-        } else {
-          List<MTProtoClient> list = new ArrayList<>();
-          list.add(protoClient);
-          protoClients.put(downloadFile.fileId, list);
-        }
-
-        ApiScheme.auth.importAuthorization importAuthorization = new ApiScheme.auth.importAuthorization();
-        if (fileCdnRedirect.get() == null) {
-          Future<TLObject> importAuthorizationFuture = wavegramClient.exportAuth(protoClient.dcId);
-          if (importAuthorizationFuture.get() instanceof ApiScheme.auth.exportedAuthorization exportedAuthorization) {
-            importAuthorization.id = exportedAuthorization.id;
-            importAuthorization.bytes = exportedAuthorization.bytes;
-          }
-        }
-
-        countDownLatch.get().await();
-
-        ApiScheme.upload.getFile getFile = new ApiScheme.upload.getFile();
-//              getFile.precise = new ApiScheme.True();
-        getFile.cdn_supported = true;
-        getFile.location = downloadFile.inputFileLocation;
-        getFile.offset = downloadFile.offset;
-        downloadFile.partSize -= downloadFile.partSize % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-        if (downloadFile.partSize < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
-          downloadFile.partSize = (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-        } else if (downloadFile.partSize > MAX_CHUNK_SIZE) {
-          downloadFile.partSize = MAX_CHUNK_SIZE;
-        }
-        long finalPartSize = downloadFile.partSize;
-
-        while (MAX_CHUNK_SIZE % finalPartSize != 0 || finalPartSize % MIN_CHUNK_SIZE != 0) {
-          finalPartSize -= (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-        }
-        long currentEndLength = -1;
-        if (size > 0) {
-          currentEndLength = downloadFile.size;
-        }
-
-        Long[] longs = new Long[]{getFile.offset, 0L};
-        if (downloadManager != null) {
-          longs = downloadFile.downloadedParts.getOrDefault(0, new Long[]{getFile.offset, 0L});
-          getFile.offset += longs[1];
-          synchronized (downloadFile) {
-            downloadFile.downloadedSize += longs[1];
-          }
-        }
-        synchronized (downloadFile) {
-          downloadFile.downloadedParts.put(0, longs);
-        }
-
-        while ((currentEndLength < 0 || getFile.offset < currentEndLength) && downloadFile.state == DownloadFile.FILE_DOWNLOADING) {
-          try {
-            countDownLatch.get().await();
-            long bytesOffset = (getFile.offset % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE));
-            if (getFile.offset < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
-              bytesOffset = (int) getFile.offset;
-              getFile.offset = 0;
-            } else {
-              getFile.offset -= bytesOffset;
-            }
-            long tempPartSize = downloadFile.partSize;
-            if ((getFile.offset + downloadFile.partSize) > MAX_CHUNK_SIZE) {
-              tempPartSize = ((getFile.offset + downloadFile.partSize) % MAX_CHUNK_SIZE) < downloadFile.partSize ?
-                downloadFile.partSize - ((getFile.offset + downloadFile.partSize) % MAX_CHUNK_SIZE) : downloadFile.partSize;
-            }
-            tempPartSize -= tempPartSize % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-            if (tempPartSize < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
-              tempPartSize = (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-            } else if (tempPartSize > MAX_CHUNK_SIZE) {
-              tempPartSize = MAX_CHUNK_SIZE;
-            }
-            if ((getFile.offset + tempPartSize) > MAX_CHUNK_SIZE) {
-              while (MAX_CHUNK_SIZE % tempPartSize != 0 || tempPartSize % MIN_CHUNK_SIZE != 0) {
-                tempPartSize -= (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-              }
-            } else {
-              while (MAX_CHUNK_SIZE % tempPartSize != 0 || tempPartSize % MIN_CHUNK_SIZE != 0) {
-                tempPartSize += (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-              }
-            }
-            long bytesLength = tempPartSize;
-            getFile.limit = (int) tempPartSize;
-
-            if (currentEndLength > 0 && getFile.offset + getFile.limit >= currentEndLength) {
-              bytesLength -= (getFile.offset + getFile.limit) - currentEndLength;
-            } else {
-              bytesLength = getFile.limit;
-            }
-
-            ApiScheme.upload.getCdnFile getCdnFile = new ApiScheme.upload.getCdnFile();
-            if (fileCdnRedirect.get() != null) {
-              getCdnFile.file_token = fileCdnRedirect.get().file_token;
-              getCdnFile.limit = getFile.limit;
-              getCdnFile.offset = getFile.offset;
-            }
-
-            ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
-            initConnection.api_id = wavegramClient.apiId;
-            initConnection.device_model = wavegramClient.deviceModel;
-            initConnection.system_version = wavegramClient.systemVersion;
-            initConnection.app_version = wavegramClient.appVersion;
-            initConnection.system_lang_code = wavegramClient.langCode;
-            initConnection.lang_pack = "";
-            initConnection.lang_code = wavegramClient.langCode;
-            initConnection.proxy = null;
-            initConnection.params = null;
-            if (fileCdnRedirect.get() != null) {
-              initConnection.query = getCdnFile;
-            } else {
-              initConnection.query = getFile;
-            }
-            ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
-            invokeWithLayer.layer = ApiScheme.LAYER_NUM;
-            invokeWithLayer.query = initConnection;
-
-            if (importAuthorization.bytes != null) {
-              initConnection.query = importAuthorization;
-              Future<TLObject> importFuture = protoClient.executeRpc(invokeWithLayer, RpcOptions.build().callback(object1 -> {
-                if (object1 instanceof ApiScheme.auth.authorization) {
-                  wavegramClient.getWavegramManager().addLoggedInDcId(downloadFile.dcId);
-                }
-              }).initRequired(false));
-              importFuture.get();
-              importAuthorization.bytes = null;
-              needInit = false;
-            }
-
-            Future<TLObject> getFileFuture = protoClient.executeRpc(needInit ? invokeWithLayer :
-              (getCdnFile.file_token != null ? getCdnFile : getFile), RpcOptions.build().initRequired(!needInit));
-            needInit = false;
-            TLObject object = getFileFuture.get();
-            synchronized (downloadFile) {
-              long expectedLength = bytesLength < bytesOffset ? bytesLength : (bytesLength - bytesOffset);
-
-              if (object instanceof ApiScheme.upload.file file) {
-                if (bytesOffset + expectedLength == file.bytes.length) {
-                  outputStream.write(file.bytes, (int) bytesOffset, (int) expectedLength);
-                  downloadFile.downloadedSize += expectedLength;
-                  longs[1] += expectedLength;
-                  downloadFile.downloadedParts.put(0, longs);
-                  if (downloadCallback != null) {
-                    downloadCallback.onProgress(downloadFile.fileId, (getFile.offset + bytesOffset), expectedLength,
-                      ByteBuffer.wrap(file.bytes, (int) bytesOffset, (int) expectedLength).array(), downloadFile.downloadedSize);
-                  }
-                } else {
-                  outputStream.write(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset));
-                  downloadFile.downloadedSize += file.bytes.length - bytesOffset;
-                  longs[1] += file.bytes.length - bytesOffset;
-                  downloadFile.downloadedParts.put(0, longs);
-                  if (downloadCallback != null) {
-                    downloadCallback.onProgress(downloadFile.fileId, (getFile.offset + bytesOffset), (int) (file.bytes.length - bytesOffset),
-                      ByteBuffer.wrap(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset)).array(), downloadFile.downloadedSize);
-                  }
-                  downloadFile.state = DownloadFile.FILE_COMPLETED;
-                  break;
-                }
-
-                if (downloadManager != null && !stream) {
-                  downloadManager.addFile(downloadFile);
-                }
-                getFile.offset += getFile.limit;
-              } else if (object instanceof ApiScheme.upload.cdnFile cdnFile) {
-                TLOutputStream outputStream2 = new TLOutputStream();
-                outputStream2.write(fileCdnRedirect.get().encryption_iv, 0, fileCdnRedirect.get().encryption_iv.length - 4);
-                outputStream2.writeIntBE((int) (getCdnFile.offset / 16));
-                byte[] bytes = CryptoUtils.AES256CTRDecrypt(cdnFile.bytes, fileCdnRedirect.get().encryption_key, outputStream2.toByteArray());
-                if (bytesOffset + expectedLength == bytes.length) {
-                  outputStream.write(bytes, (int) bytesOffset, (int) expectedLength);
-                  downloadFile.downloadedSize += expectedLength;
-                  longs[1] += expectedLength;
-                  downloadFile.downloadedParts.put(0, longs);
-                  if (downloadCallback != null) {
-                    downloadCallback.onProgress(downloadFile.fileId, (getFile.offset + bytesOffset), expectedLength,
-                      ByteBuffer.wrap(bytes, (int) bytesOffset, (int) expectedLength).array(), downloadFile.downloadedSize);
-                  }
-                } else {
-                  outputStream.write(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset));
-                  downloadFile.downloadedSize += bytes.length - bytesOffset;
-                  longs[1] += bytes.length - bytesOffset;
-                  downloadFile.downloadedParts.put(0, longs);
-                  if (downloadCallback != null) {
-                    downloadCallback.onProgress(downloadFile.fileId, (getFile.offset + bytesOffset), (int) (bytes.length - bytesOffset),
-                      ByteBuffer.wrap(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset)).array(), downloadFile.downloadedSize);
-                  }
-                  downloadFile.state = DownloadFile.FILE_COMPLETED;
-                  break;
-                }
-
-                if (downloadManager != null && !stream) {
-                  downloadManager.addFile(downloadFile);
-                }
-                getFile.offset += getFile.limit;
-              } else if (object instanceof ApiScheme.upload.fileCdnRedirect fileCdnRedirect1) {
-                fileCdnRedirect.set(fileCdnRedirect1);
-                downloadFile.dcId = fileCdnRedirect1.dc_id;
-                protoClient.setDcOptions(wavegramClient.getCdnDcs());
-                protoClient.rsaPublicRsaKeys = wavegramClient.getCdnRsaKeys();
-                countDownLatch.set(new CountDownLatch(1));
-                needInit = true;
-                protoClient.switchDc(downloadFile.dcId);
-              } else if (object instanceof ApiScheme.upload.cdnFileReuploadNeeded reuploadNeeded) {
-                ApiScheme.upload.reuploadCdnFile reuploadCdnFile = new ApiScheme.upload.reuploadCdnFile();
-                reuploadCdnFile.file_token = getCdnFile.file_token;
-                reuploadCdnFile.request_token = reuploadNeeded.request_token;
-                countDownLatch.set(new CountDownLatch(1));
-                protoClient.switchDc(dcId);
-                countDownLatch.get().await();
-                initConnection.query = reuploadCdnFile;
-                Future<TLObject> reuploadFuture = protoClient.executeRpc(invokeWithLayer);
-                if (!(reuploadFuture.get() instanceof TLVector<?>)) {
-                  MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-                  rpcError2.error_code = -1;
-                  rpcError2.error_message = "SOMETHING_WENT_WRONG";
-                  if (reuploadFuture.get() instanceof MTProtoScheme.rpc_error error2) {
-                    rpcError2 = error2;
-                  }
-                  if (downloadCallback != null) {
-                    downloadCallback.onError(downloadFile.fileId, rpcError2);
-                  }
-                  downloadFile.state = DownloadFile.FILE_CANCEL;
-                  break;
-                }
-                countDownLatch.set(new CountDownLatch(1));
-                needInit = true;
-                protoClient.switchDc(downloadFile.dcId);
-              } else if (object instanceof MTProtoScheme.rpc_error rpcError) {
-                if (downloadCallback != null) {
-                  downloadCallback.onError(downloadFile.fileId, rpcError);
-                }
-                downloadFile.state = DownloadFile.FILE_CANCEL;
-                break;
-              }
-            }
-          } catch (InterruptedException | ExecutionException e) {
-            e.printStackTrace();
-            if (downloadCallback != null) {
-              MTProtoScheme.rpc_error rpcError = new MTProtoScheme.rpc_error();
-              rpcError.error_code = -1;
-              rpcError.error_message = e.getMessage();
-              downloadCallback.onError(downloadFile.fileId, rpcError);
-            }
-            downloadFile.state = DownloadFile.FILE_CANCEL;
-            break;
-          }
-        }
-        protoClient.close();
-        protoClients.get(downloadFile.fileId).remove(protoClient);
-
-        futures.remove(downloadFile.fileId);
-
-        if (downloadFile.downloadedSize == downloadFile.size - downloadFile.offset ||
-          downloadFile.state == DownloadFile.FILE_COMPLETED) {
-          downloadFiles.removeIf(df -> df.fileId == downloadFile.fileId);
-          downloadFile.state = DownloadFile.FILE_COMPLETED;
-          if (downloadManager != null && !stream) {
-            downloadManager.addFile(downloadFile);
-          }
-          if (downloadCallback != null) {
-            downloadCallback.onComplete(downloadFile.fileId, downloadFile);
-          }
-        } else {
-          MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-          rpcError2.error_code = -1;
-          rpcError2.error_message = "FILE_PART_INVALID";
-          if (downloadCallback != null) {
-            downloadCallback.onError(downloadFile.fileId, rpcError2);
-          }
-        }
-      } catch (Exception e) {
-        e.printStackTrace();
-      }
-    });
-    futures.put(downloadFile.fileId, future);
+    downloadFile.dcId = dcId;
+    downloadFile.partSize = partSize;
+    downloadFile.offset = offset;
+    downloadFile.size = size;
+    return download(downloadFile, outputStream, stream);
   }
 
-  public void download(ApiScheme.InputFileLocationType inputFileLocation, int dcId, long partSize, long offset,
-                       long size, String filepath, boolean stream) {
-    if (executorService == null || executorService.isTerminated()) {
-      executorService = Executors.newFixedThreadPool(parallelDownloadLimit);
-    }
-    DownloadFile downloadFile = new DownloadFile();
-    downloadFile.partSize = partSize;
-    downloadFile.size = size;
-    downloadFile.offset = offset;
-    if (inputFileLocation instanceof ApiScheme.inputDocumentFileLocation inputDocumentFileLocation) {
-      downloadFile.fileId = inputDocumentFileLocation.id;
-    } else if (inputFileLocation instanceof ApiScheme.inputPhotoFileLocation inputPhotoFileLocation) {
-      downloadFile.fileId = inputPhotoFileLocation.id;
-    } else if (inputFileLocation instanceof ApiScheme.inputEncryptedFileLocation inputEncryptedFileLocation) {
-      downloadFile.fileId = inputEncryptedFileLocation.id;
-    } else if (inputFileLocation instanceof ApiScheme.inputPeerPhotoFileLocation inputPeerPhotoFileLocation) {
-      downloadFile.fileId = inputPeerPhotoFileLocation.photo_id;
-    } else if (inputFileLocation instanceof ApiScheme.inputSecureFileLocation inputSecureFileLocation) {
-      downloadFile.fileId = inputSecureFileLocation.id;
-    }
+  public CompletableFuture<DownloadFile> download(ApiScheme.InputFileLocationType inputFileLocation, int dcId, long partSize, long offset,
+                                                  long size, String filepath, boolean stream) {
 
+    DownloadFile downloadFile = new DownloadFile();
+    downloadFile.inputFileLocation = inputFileLocation;
     downloadFile.dcId = dcId;
+    downloadFile.partSize = partSize;
+    downloadFile.offset = offset;
+    downloadFile.size = size;
     downloadFile.filepath = filepath;
-    downloadFile.inputFileLocation = inputFileLocation;
+    return download(downloadFile, null, stream);
+  }
+
+  private CompletableFuture<DownloadFile> download(DownloadFile downloadFile, OutputStream outputStream, boolean stream) {
+    if (executorService == null || executorService.isShutdown()) {
+      executorService = Executors.newFixedThreadPool(parallelDownloadLimit);
+    }
+    CompletableFuture<DownloadFile> future = new CompletableFuture<>();
+
+    if (downloadFile.inputFileLocation instanceof ApiScheme.inputDocumentFileLocation inputDocumentFileLocation) {
+      downloadFile.fileId = inputDocumentFileLocation.id;
+    } else if (downloadFile.inputFileLocation instanceof ApiScheme.inputPhotoFileLocation inputPhotoFileLocation) {
+      downloadFile.fileId = inputPhotoFileLocation.id;
+    } else if (downloadFile.inputFileLocation instanceof ApiScheme.inputEncryptedFileLocation inputEncryptedFileLocation) {
+      downloadFile.fileId = inputEncryptedFileLocation.id;
+    } else if (downloadFile.inputFileLocation instanceof ApiScheme.inputPeerPhotoFileLocation inputPeerPhotoFileLocation) {
+      downloadFile.fileId = inputPeerPhotoFileLocation.photo_id;
+    } else if (downloadFile.inputFileLocation instanceof ApiScheme.inputSecureFileLocation inputSecureFileLocation) {
+      downloadFile.fileId = inputSecureFileLocation.id;
+    }
 
     if (downloadManager != null && !stream) {
-      DownloadFile downloadFile1 = downloadManager.getFile(downloadFile.fileId);
-      if (downloadFile1 != null) {
-        downloadFile.downloadedSize = downloadFile1.downloadedSize;
-        downloadFile.downloadedParts = downloadFile1.downloadedParts;
+      DownloadFile tempDownloadFile = downloadManager.getFile(downloadFile.fileId);
+      if (tempDownloadFile != null) {
+        downloadFile.downloadedSize = tempDownloadFile.downloadedSize;
+        downloadFile.downloadedParts = tempDownloadFile.downloadedParts;
       } else {
         downloadManager.addFile(downloadFile);
       }
     }
-    downloadFiles.add(downloadFile);
 
-    Future<?> future = executorService.submit(() -> {
+    downloadFiles.put(downloadFile.fileId, downloadFile);
+    int dcId = downloadFile.dcId;
+
+    downloadFile.future = executorService.submit(() -> {
       try {
         downloadFile.state = DownloadFile.FILE_DOWNLOADING;
         if (downloadCallback != null) {
-          downloadCallback.onStart(downloadFile.fileId, downloadFile);
+          downloadCallback.onStart(downloadFile);
         }
 
         int threadCount = 1;
-        if (size > 0 && downloadFile.size - downloadFile.offset > MAX_CHUNK_SIZE * 10) {
+        if (downloadFile.size > 0 && downloadFile.size - downloadFile.offset > MAX_CHUNK_SIZE * 10) {
           threadCount = threadPerDownload;
         }
 
         CountDownLatch firstLatch = new CountDownLatch(1);
 
-        RandomAccessFile randomAccessFile = new RandomAccessFile(downloadFile.filepath, "rw");
-        if (size > 0) {
-          randomAccessFile.setLength(downloadFile.size - downloadFile.offset);
+        AtomicReference<RandomAccessFile> randomAccessFile = new AtomicReference<>(null);
+        if (outputStream == null) {
+          randomAccessFile.set(new RandomAccessFile(downloadFile.filepath, "rw"));
+          if (downloadFile.size > 0) {
+            randomAccessFile.get().setLength(downloadFile.size - downloadFile.offset);
+          }
+        } else {
+          threadCount = 1;
         }
+
+        AtomicReference<MTProtoScheme.rpc_error> rpcError = new AtomicReference<>(new MTProtoScheme.rpc_error());
+        rpcError.get().error_code = -1;
 
         AtomicReference<ApiScheme.upload.fileCdnRedirect> fileCdnRedirect = new AtomicReference<>(null);
 
@@ -702,74 +260,23 @@ public class WavegramDownloader {
         downloadExecutorServiceMap.put(downloadFile.fileId, downloadExecutorService);
         List<Future<?>> downloadFutures = new ArrayList<>();
         for (int i = 0; i < threadCount; i++) {
-          AtomicReference<CountDownLatch> countDownLatch = new AtomicReference<>(new CountDownLatch(1));
-          AtomicBoolean needInit = new AtomicBoolean(true);
           MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
           protoClient.context = wavegramClient.context;
           protoClient.sentMsgCacheLimit = 5;
           protoClient.recvMsgCacheLimit = 5;
-          protoClient.setClientManager(new DownloadClientManager(downloadFile,
-            wavegramClient.getClientManager()));
+          protoClient.tempSession = true;
+          protoClient.dcId = downloadFile.dcId;
+          protoClient.setClientManager(wavegramClient.getClientManager());
           if (fileCdnRedirect.get() != null) {
             List<MTDcOption> dcOptions = wavegramClient.getDcOptions();
             dcOptions.addAll(wavegramClient.getCdnDcs());
             protoClient.setDcOptions(dcOptions);
             protoClient.rsaPublicRsaKeys = wavegramClient.getCdnRsaKeys();
           } else {
-            protoClient.rsaPublicRsaKeys = Config.RSA_PUBLIC_KEYS;
+            protoClient.rsaPublicRsaKeys = wavegramClient.rsaPublicRsaKeys;
           }
+          Future<?> startFuture = protoClient.start();
           int finalI = i;
-          protoClient.setProtoCallback(new ProtoCallback() {
-            @Override
-            public void onStart() {
-              System.out.println(TAG + ".onStart: called");
-              countDownLatch.get().countDown();
-            }
-
-            @Override
-            public void onSessionCreated(MTProtoScheme.new_session_created sessionCreated) {
-              System.out.println(TAG + ".onSessionCreated: called");
-              countDownLatch.get().countDown();
-            }
-
-            @Override
-            public void onSessionDestroyed(long sessionId) {
-
-            }
-
-            @Override
-            public void onAuthCreated(AuthKey.Type type) {
-              System.out.println(TAG + ".onAuthCreated: called");
-            }
-
-            @Override
-            public void onAuthDestroyed(AuthKey.Type type) {
-
-            }
-
-            @Override
-            public void onMessage(TLObject object) {
-              System.out.println(TAG + ".onMessage: " + object + " " + finalI);
-              if (object instanceof MTProtoScheme.rpc_result rpcResult && rpcResult.result instanceof MTProtoScheme.rpc_error rpcError) {
-                System.err.println(TAG + ".object: " + ApiError.getDescription(rpcError.error_message));
-              }
-            }
-
-            @Override
-            public void onTransportError(TransportError error) {
-              System.err.println(TAG + ".onTransportError: " + error + " " + finalI);
-              if (error == TransportError.AUTH_KEY_NOT_FOUND && wavegramClient.getWavegramManager() != null) {
-                wavegramClient.getWavegramManager().removeLoggedInDcId(dcId);
-              }
-            }
-
-            @Override
-            public void onClose() {
-              System.out.println(TAG + ".onClose: called " + finalI + " " + downloadFile.fileId);
-            }
-          });
-          protoClient.dcId = downloadFile.dcId;
-          protoClient.start();
 
           if (protoClients.containsKey(downloadFile.fileId)) {
             protoClients.get(downloadFile.fileId).add(protoClient);
@@ -779,21 +286,87 @@ public class WavegramDownloader {
             protoClients.put(downloadFile.fileId, list);
           }
 
-          ApiScheme.auth.importAuthorization importAuthorization = new ApiScheme.auth.importAuthorization();
-          if (fileCdnRedirect.get() == null) {
-            Future<TLObject> importAuthorizationFuture = wavegramClient.exportAuth(protoClient.dcId);
-            if (importAuthorizationFuture.get() instanceof ApiScheme.auth.exportedAuthorization exportedAuthorization) {
-              importAuthorization.id = exportedAuthorization.id;
-              importAuthorization.bytes = exportedAuthorization.bytes;
+          ApiScheme.auth.importAuthorization importAuthorization = null;
+          if (i == 0) { // if file.dcId not logged in, export login using main client
+            try {
+              TLObject exportAuthorizationRes = wavegramClient.exportAuth(protoClient.dcId).get();
+              if (exportAuthorizationRes instanceof ApiScheme.auth.exportedAuthorization exportedAuthorization) {
+                importAuthorization = new ApiScheme.auth.importAuthorization();
+                importAuthorization.id = exportedAuthorization.id;
+                importAuthorization.bytes = exportedAuthorization.bytes;
+              } else {
+                downloadFile.state = DownloadFile.FILE_CANCEL;
+                rpcError.get().error_message = "UNKNOWN_RESULT";
+                break;
+              }
+            } catch (ExecutionException e) {
+              if (e.getCause() instanceof RpcException rpcException) {
+                if (!Objects.equals(rpcException.getRpcError().error_message, "LOGGED_IN_THIS_DC")) {
+                  downloadFile.state = DownloadFile.FILE_CANCEL;
+                  rpcError.set(rpcException.getRpcError());
+                  break;
+                }
+              }
+            } catch (Exception e) {
+              downloadFile.state = DownloadFile.FILE_CANCEL;
+              rpcError.get().error_message = e.getMessage();
+              break;
             }
           }
 
-          countDownLatch.get().await();
+          startFuture.get();
+
+          ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
+          invokeWithLayer.layer = ApiScheme.LAYER_NUM;
+
+          ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
+          initConnection.api_id = wavegramClient.apiId;
+          initConnection.device_model = wavegramClient.deviceModel;
+          initConnection.system_version = wavegramClient.systemVersion;
+          initConnection.app_version = wavegramClient.appVersion;
+          initConnection.system_lang_code = wavegramClient.langCode;
+          initConnection.lang_pack = "";
+          initConnection.lang_code = wavegramClient.langCode;
+          initConnection.proxy = null;
+          initConnection.params = null;
+
+          if (importAuthorization != null) {
+            initConnection.query = importAuthorization;
+            invokeWithLayer.query = initConnection;
+
+            try {
+              TLObject importRes = protoClient.executeRpc(
+                invokeWithLayer, RpcOptions.build().initRequired(false)
+              ).get();
+              if (importRes instanceof ApiScheme.auth.authorization) {
+                wavegramClient.getWavegramManager().addLoggedInDcId(downloadFile.dcId);
+              } else if (importRes instanceof MTProtoScheme.rpc_error error) {
+                downloadFile.state = DownloadFile.FILE_CANCEL;
+                rpcError.set(error);
+                break;
+              } else {
+                downloadFile.state = DownloadFile.FILE_CANCEL;
+                rpcError.get().error_message = "UNKNOWN_RESULT";
+                break;
+              }
+            } catch (ExecutionException e) {
+              if (e.getCause() instanceof RpcException rpcException) {
+                downloadFile.state = DownloadFile.FILE_CANCEL;
+                rpcError.set(rpcException.getRpcError());
+                break;
+              }
+            } catch (Exception e) {
+              downloadFile.state = DownloadFile.FILE_CANCEL;
+              rpcError.get().error_message = e.getMessage();
+              break;
+            }
+          }
 
           int finalThreadCount = threadCount;
           Future<?> downloadFuture = downloadExecutorService.submit(() -> {
+            ApiScheme.upload.getCdnFile getCdnFile = new ApiScheme.upload.getCdnFile();
             ApiScheme.upload.getFile getFile = new ApiScheme.upload.getFile();
-//                        getFile.precise = new ApiScheme.True();
+            getFile.precise = stream;
             getFile.cdn_supported = true;
             getFile.location = downloadFile.inputFileLocation;
             getFile.offset = downloadFile.offset;
@@ -808,15 +381,15 @@ public class WavegramDownloader {
             while (MAX_CHUNK_SIZE % finalPartSize != 0 || finalPartSize % MIN_CHUNK_SIZE != 0) {
               finalPartSize -= (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
             }
-            long currentEndLength = -1;
-            if (size > 0) {
-              long endLength = downloadFile.size / finalThreadCount;
-              endLength -= endLength % finalPartSize;
-              getFile.offset += endLength * finalI;
-              endLength += endLength * finalI;
-              currentEndLength = endLength;
+            long currentEndPos = -1;
+            if (downloadFile.size > 0) {
+              long lengthPerThread = downloadFile.size / finalThreadCount;
+              lengthPerThread -= lengthPerThread % finalPartSize;
+              getFile.offset += lengthPerThread * finalI;
+              lengthPerThread += lengthPerThread * finalI;
+              currentEndPos = lengthPerThread;
               if (finalI == finalThreadCount - 1) {
-                currentEndLength = downloadFile.size;
+                currentEndPos = downloadFile.size;
               }
             }
 
@@ -832,108 +405,95 @@ public class WavegramDownloader {
               downloadFile.downloadedParts.put(finalI, longs);
             }
 
-            while ((currentEndLength < 0 || getFile.offset < currentEndLength) && downloadFile.state == DownloadFile.FILE_DOWNLOADING) {
+            while ((currentEndPos < 0 || getFile.offset < currentEndPos) && downloadFile.state == DownloadFile.FILE_DOWNLOADING) {
+
+              long bytesOffset = (getFile.offset % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE));
+              if (getFile.offset < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
+                bytesOffset = (int) getFile.offset;
+                getFile.offset = 0;
+              } else {
+                getFile.offset -= bytesOffset;
+              }
+              long tempPartSize = downloadFile.partSize;
+              if ((getFile.offset + downloadFile.partSize) > MAX_CHUNK_SIZE) {
+                tempPartSize = ((getFile.offset + downloadFile.partSize) % MAX_CHUNK_SIZE) < downloadFile.partSize ?
+                  downloadFile.partSize - ((getFile.offset + downloadFile.partSize) % MAX_CHUNK_SIZE) : downloadFile.partSize;
+              }
+              tempPartSize -= tempPartSize % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
+              if (tempPartSize < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
+                tempPartSize = (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
+              } else if (tempPartSize > MAX_CHUNK_SIZE) {
+                tempPartSize = MAX_CHUNK_SIZE;
+              }
+              if ((getFile.offset + tempPartSize) > MAX_CHUNK_SIZE) {
+                while (MAX_CHUNK_SIZE % tempPartSize != 0 || tempPartSize % MIN_CHUNK_SIZE != 0) {
+                  tempPartSize -= (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
+                }
+              } else {
+                while (MAX_CHUNK_SIZE % tempPartSize != 0 || tempPartSize % MIN_CHUNK_SIZE != 0) {
+                  tempPartSize += (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
+                }
+              }
+              long bytesLength = tempPartSize;
+              getFile.limit = (int) tempPartSize;
+
+              if (currentEndPos > 0 && getFile.offset + getFile.limit >= currentEndPos) {
+                bytesLength -= (getFile.offset + getFile.limit) - currentEndPos;
+              } else {
+                bytesLength = getFile.limit;
+              }
+
+              if (fileCdnRedirect.get() != null) {
+                getCdnFile = new ApiScheme.upload.getCdnFile();
+                getCdnFile.file_token = fileCdnRedirect.get().file_token;
+                getCdnFile.limit = getFile.limit;
+                getCdnFile.offset = getFile.offset;
+              }
+
+              if (fileCdnRedirect.get() != null) {
+                initConnection.query = getCdnFile;
+              } else {
+                initConnection.query = getFile;
+              }
+              invokeWithLayer.query = initConnection;
+
+              Future<TLObject> getFileFuture = protoClient.executeRpc(
+                protoClient.isInited ? fileCdnRedirect.get() == null ? getFile : getCdnFile :
+                  invokeWithLayer, RpcOptions.build().initRequired(protoClient.isInited)
+              );
               try {
-                countDownLatch.get().await();
-                long bytesOffset = (getFile.offset % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE));
-                if (getFile.offset < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
-                  bytesOffset = (int) getFile.offset;
-                  getFile.offset = 0;
-                } else {
-                  getFile.offset -= bytesOffset;
-                }
-                long tempPartSize = downloadFile.partSize;
-                if ((getFile.offset + downloadFile.partSize) > MAX_CHUNK_SIZE) {
-                  tempPartSize = ((getFile.offset + downloadFile.partSize) % MAX_CHUNK_SIZE) < downloadFile.partSize ?
-                    downloadFile.partSize - ((getFile.offset + downloadFile.partSize) % MAX_CHUNK_SIZE) : downloadFile.partSize;
-                }
-                tempPartSize -= tempPartSize % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-                if (tempPartSize < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
-                  tempPartSize = (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-                } else if (tempPartSize > MAX_CHUNK_SIZE) {
-                  tempPartSize = MAX_CHUNK_SIZE;
-                }
-                if ((getFile.offset + tempPartSize) > MAX_CHUNK_SIZE) {
-                  while (MAX_CHUNK_SIZE % tempPartSize != 0 || tempPartSize % MIN_CHUNK_SIZE != 0) {
-                    tempPartSize -= (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-                  }
-                } else {
-                  while (MAX_CHUNK_SIZE % tempPartSize != 0 || tempPartSize % MIN_CHUNK_SIZE != 0) {
-                    tempPartSize += (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-                  }
-                }
-                long bytesLength = tempPartSize;
-                getFile.limit = (int) tempPartSize;
-
-                if (currentEndLength > 0 && getFile.offset + getFile.limit >= currentEndLength) {
-                  bytesLength -= (getFile.offset + getFile.limit) - currentEndLength;
-                } else {
-                  bytesLength = getFile.limit;
-                }
-
-                ApiScheme.upload.getCdnFile getCdnFile = new ApiScheme.upload.getCdnFile();
-                if (fileCdnRedirect.get() != null) {
-                  getCdnFile.file_token = fileCdnRedirect.get().file_token;
-                  getCdnFile.limit = getFile.limit;
-                  getCdnFile.offset = getFile.offset;
-                }
-
-                ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
-                initConnection.api_id = wavegramClient.apiId;
-                initConnection.device_model = wavegramClient.deviceModel;
-                initConnection.system_version = wavegramClient.systemVersion;
-                initConnection.app_version = wavegramClient.appVersion;
-                initConnection.system_lang_code = wavegramClient.langCode;
-                initConnection.lang_pack = "";
-                initConnection.lang_code = wavegramClient.langCode;
-                initConnection.proxy = null;
-                initConnection.params = null;
-                if (fileCdnRedirect.get() != null) {
-                  initConnection.query = getCdnFile;
-                } else {
-                  initConnection.query = getFile;
-                }
-                ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
-                invokeWithLayer.layer = ApiScheme.LAYER_NUM;
-                invokeWithLayer.query = initConnection;
-
-                if (importAuthorization.bytes != null) {
-                  initConnection.query = importAuthorization;
-                  Future<TLObject> importFuture = protoClient.executeRpc(invokeWithLayer, RpcOptions.build().callback(object1 -> {
-                    if (object1 instanceof ApiScheme.auth.authorization) {
-                      wavegramClient.getWavegramManager().addLoggedInDcId(downloadFile.dcId);
-                    }
-                  }).initRequired(false));
-                  importFuture.get();
-                  importAuthorization.bytes = null;
-                  needInit.set(false);
-                }
-
-                Future<TLObject> getFileFuture = protoClient.executeRpc(needInit.get() ? invokeWithLayer :
-                  (getCdnFile.file_token != null ? getCdnFile : getFile), RpcOptions.build().initRequired(!needInit.get()));
                 TLObject object = getFileFuture.get();
-                needInit.set(false);
                 synchronized (downloadFile) {
                   long expectedLength = bytesLength < bytesOffset ? bytesLength : (bytesLength - bytesOffset);
 
                   if (object instanceof ApiScheme.upload.file file) {
-                    randomAccessFile.seek((getFile.offset + bytesOffset) - downloadFile.offset);
+                    if (randomAccessFile.get() != null) {
+                      randomAccessFile.get().seek((getFile.offset + bytesOffset) - downloadFile.offset);
+                    }
                     if (bytesOffset + expectedLength == file.bytes.length) {
-                      randomAccessFile.write(file.bytes, (int) bytesOffset, (int) expectedLength);
+                      if (outputStream != null) {
+                        outputStream.write(file.bytes, (int) bytesOffset, (int) expectedLength);
+                      } else {
+                        randomAccessFile.get().write(file.bytes, (int) bytesOffset, (int) expectedLength);
+                      }
                       downloadFile.downloadedSize += expectedLength;
                       longs[1] += expectedLength;
                       downloadFile.downloadedParts.put(finalI, longs);
                       if (downloadCallback != null) {
-                        downloadCallback.onProgress(downloadFile.fileId, (getFile.offset + bytesOffset), expectedLength,
+                        downloadCallback.onProgress(downloadFile, (getFile.offset + bytesOffset), expectedLength,
                           ByteBuffer.wrap(file.bytes, (int) bytesOffset, (int) expectedLength).array(), downloadFile.downloadedSize);
                       }
                     } else {
-                      randomAccessFile.write(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset));
+                      if (outputStream != null) {
+                        outputStream.write(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset));
+                      } else {
+                        randomAccessFile.get().write(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset));
+                      }
                       downloadFile.downloadedSize += file.bytes.length - bytesOffset;
                       longs[1] += file.bytes.length - bytesOffset;
                       downloadFile.downloadedParts.put(finalI, longs);
                       if (downloadCallback != null) {
-                        downloadCallback.onProgress(downloadFile.fileId, (getFile.offset + bytesOffset), (int) (file.bytes.length - bytesOffset),
+                        downloadCallback.onProgress(downloadFile, (getFile.offset + bytesOffset), (int) (file.bytes.length - bytesOffset),
                           ByteBuffer.wrap(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset)).array(), downloadFile.downloadedSize);
                       }
                       firstLatch.countDown();
@@ -946,30 +506,40 @@ public class WavegramDownloader {
                     }
                     getFile.offset += getFile.limit;
                   } else if (object instanceof ApiScheme.upload.cdnFile cdnFile) {
-                    TLOutputStream outputStream = new TLOutputStream();
-                    outputStream.write(fileCdnRedirect.get().encryption_iv, 0, fileCdnRedirect.get().encryption_iv.length - 4);
-                    outputStream.writeIntBE((int) (getCdnFile.offset / 16));
-                    byte[] bytes = CryptoUtils.AES256CTRDecrypt(cdnFile.bytes,
-                      fileCdnRedirect.get().encryption_key,
-                      outputStream.toByteArray());
-                    randomAccessFile.seek((getFile.offset + bytesOffset) - downloadFile.offset);
+                    TLOutputStream aesKey = new TLOutputStream();
+                    aesKey.write(fileCdnRedirect.get().encryption_iv, 0, fileCdnRedirect.get().encryption_iv.length - 4);
+                    aesKey.writeIntBE((int) (getCdnFile.offset / 16));
+                    byte[] bytes = CryptoUtils.AES256CTRDecrypt(cdnFile.bytes, fileCdnRedirect.get().encryption_key,
+                      aesKey.toByteArray());
+
+                    if (randomAccessFile.get() != null) {
+                      randomAccessFile.get().seek((getFile.offset + bytesOffset) - downloadFile.offset);
+                    }
 
                     if (bytesOffset + expectedLength == bytes.length) {
-                      randomAccessFile.write(bytes, (int) bytesOffset, (int) expectedLength);
+                      if (outputStream != null) {
+                        outputStream.write(bytes, (int) bytesOffset, (int) expectedLength);
+                      } else {
+                        randomAccessFile.get().write(bytes, (int) bytesOffset, (int) expectedLength);
+                      }
                       downloadFile.downloadedSize += expectedLength;
                       longs[1] += expectedLength;
                       downloadFile.downloadedParts.put(finalI, longs);
                       if (downloadCallback != null) {
-                        downloadCallback.onProgress(downloadFile.fileId, (getFile.offset + bytesOffset), expectedLength,
+                        downloadCallback.onProgress(downloadFile, (getFile.offset + bytesOffset), expectedLength,
                           ByteBuffer.wrap(bytes, (int) bytesOffset, (int) expectedLength).array(), downloadFile.downloadedSize);
                       }
                     } else {
-                      randomAccessFile.write(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset));
+                      if (outputStream != null) {
+                        outputStream.write(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset));
+                      } else {
+                        randomAccessFile.get().write(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset));
+                      }
                       downloadFile.downloadedSize += bytes.length - bytesOffset;
                       longs[1] += bytes.length - bytesOffset;
                       downloadFile.downloadedParts.put(finalI, longs);
                       if (downloadCallback != null) {
-                        downloadCallback.onProgress(downloadFile.fileId, (getFile.offset + bytesOffset), (int) (bytes.length - bytesOffset),
+                        downloadCallback.onProgress(downloadFile, (getFile.offset + bytesOffset), (int) (bytes.length - bytesOffset),
                           ByteBuffer.wrap(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset)).array(), downloadFile.downloadedSize);
                       }
                       firstLatch.countDown();
@@ -981,60 +551,55 @@ public class WavegramDownloader {
                       downloadManager.addFile(downloadFile);
                     }
                     getFile.offset += getFile.limit;
-                  } else if (object instanceof ApiScheme.upload.fileCdnRedirect fileCdnRedirect1) {
-                    fileCdnRedirect.set(fileCdnRedirect1);
-                    downloadFile.dcId = fileCdnRedirect1.dc_id;
+                  } else if (object instanceof ApiScheme.upload.fileCdnRedirect cdnRedirect) {
+                    fileCdnRedirect.set(cdnRedirect);
+                    downloadFile.dcId = cdnRedirect.dc_id;
                     protoClient.setDcOptions(wavegramClient.getCdnDcs());
                     protoClient.setRsaPublicKeys(wavegramClient.getCdnRsaKeys());
-                    countDownLatch.set(new CountDownLatch(1));
-                    needInit.set(true);
                     protoClient.switchDc(downloadFile.dcId);
                     continue;
                   } else if (object instanceof ApiScheme.upload.cdnFileReuploadNeeded reuploadNeeded) {
                     ApiScheme.upload.reuploadCdnFile reuploadCdnFile = new ApiScheme.upload.reuploadCdnFile();
                     reuploadCdnFile.file_token = getCdnFile.file_token;
                     reuploadCdnFile.request_token = reuploadNeeded.request_token;
-                    countDownLatch.set(new CountDownLatch(1));
                     protoClient.switchDc(dcId);
-                    countDownLatch.get().await();
                     initConnection.query = reuploadCdnFile;
-                    Future<TLObject> reuploadFuture = protoClient.executeRpc(invokeWithLayer);
-                    if (!(reuploadFuture.get() instanceof TLVector<?>)) {
-                      MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-                      rpcError2.error_code = -1;
-                      rpcError2.error_message = "SOMETHING_WENT_WRONG";
-                      if (reuploadFuture.get() instanceof MTProtoScheme.rpc_error error2) {
-                        rpcError2 = error2;
-                      }
-                      if (downloadCallback != null) {
-                        downloadCallback.onError(downloadFile.fileId, rpcError2);
-                      }
+                    invokeWithLayer.query = initConnection;
+                    TLObject reuploadRes = protoClient.executeRpc(invokeWithLayer, RpcOptions.build().initRequired(false)).get();
+                    if (reuploadRes instanceof MTProtoScheme.rpc_error error) {
                       downloadFile.state = DownloadFile.FILE_CANCEL;
-                      firstLatch.countDown();
+                      rpcError.set(error);
+                      if (downloadCallback != null) {
+                        downloadCallback.onError(downloadFile, error);
+                      }
                       break;
                     }
-                    countDownLatch.set(new CountDownLatch(1));
-                    needInit.set(true);
                     protoClient.switchDc(downloadFile.dcId);
-                  } else if (object instanceof MTProtoScheme.rpc_error rpcError) {
-                    if (downloadCallback != null) {
-                      downloadCallback.onError(downloadFile.fileId, rpcError);
-                    }
+                  } else if (object instanceof MTProtoScheme.rpc_error error) {
                     downloadFile.state = DownloadFile.FILE_CANCEL;
-                    firstLatch.countDown();
+                    rpcError.set(error);
+                    if (downloadCallback != null) {
+                      downloadCallback.onError(downloadFile, error);
+                    }
                     break;
                   }
                   firstLatch.countDown();
                 }
-              } catch (InterruptedException | ExecutionException | IOException e) {
-                e.printStackTrace();
-                if (downloadCallback != null) {
-                  MTProtoScheme.rpc_error rpcError = new MTProtoScheme.rpc_error();
-                  rpcError.error_code = -1;
-                  rpcError.error_message = e.getMessage();
-                  downloadCallback.onError(downloadFile.fileId, rpcError);
+              } catch (ExecutionException e) {
+                if (e.getCause() instanceof RpcException rpcException) {
+                  downloadFile.state = DownloadFile.FILE_CANCEL;
+                  rpcError.set(rpcException.getRpcError());
+                  if (downloadCallback != null) {
+                    downloadCallback.onError(downloadFile, rpcError.get());
+                  }
+                  break;
                 }
+              } catch (Exception e) {
                 downloadFile.state = DownloadFile.FILE_CANCEL;
+                rpcError.get().error_message = e.getMessage();
+                if (downloadCallback != null) {
+                  downloadCallback.onError(downloadFile, rpcError.get());
+                }
                 break;
               }
             }
@@ -1050,93 +615,85 @@ public class WavegramDownloader {
           downloadFuture.get();
         }
         downloadFutures.clear();
-        downloadExecutorService.shutdownNow();
-        randomAccessFile.close();
-        futures.remove(downloadFile.fileId);
+        downloadExecutorService.close();
+        if (randomAccessFile.get() != null) {
+          randomAccessFile.get().close();
+        }
 
         if (downloadFile.downloadedSize == downloadFile.size - downloadFile.offset ||
           downloadFile.state == DownloadFile.FILE_COMPLETED) {
-          downloadFiles.removeIf(df -> df.fileId == downloadFile.fileId);
           downloadFile.state = DownloadFile.FILE_COMPLETED;
+          Logger.logger.logi("file: " + downloadFile + " completed\n");
           if (downloadManager != null && !stream) {
             downloadManager.addFile(downloadFile);
           }
+          future.complete(downloadFile);
           if (downloadCallback != null) {
-            downloadCallback.onComplete(downloadFile.fileId, downloadFile);
+            downloadCallback.onComplete(downloadFile);
           }
         } else {
-          MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-          rpcError2.error_code = -1;
-          rpcError2.error_message = "FILE_PART_INVALID";
+          Logger.logger.loge("file: " + downloadFile + ", error: " + rpcError + "\n");
+          future.completeExceptionally(new RpcException(rpcError.get()));
           if (downloadCallback != null) {
-            downloadCallback.onError(downloadFile.fileId, rpcError2);
+            downloadCallback.onError(downloadFile, rpcError.get());
           }
         }
+
+        downloadFiles.remove(downloadFile.fileId);
       } catch (Exception e) {
         e.printStackTrace();
       }
     });
-    futures.put(downloadFile.fileId, future);
+
+    return future.copy();
   }
 
-
   public void remove(long fileId) {
-    downloadFiles.removeIf((downloadFile) -> {
-      if (downloadFile.fileId == fileId) {
-        downloadFile.state = DownloadFile.FILE_CANCEL;
-        if (futures.containsKey(downloadFile.fileId)) {
-          futures.get(downloadFile.fileId).cancel(true);
-        }
-        if (protoClients.containsKey(fileId)) {
-          protoClients.remove(fileId).forEach(MTProtoClient::close);
-        }
-        if (downloadExecutorServiceMap.containsKey(downloadFile.fileId)) {
-          downloadExecutorServiceMap.remove(downloadFile.fileId).shutdownNow();
-        }
-        return true;
+    DownloadFile downloadFile = downloadFiles.get(fileId);
+    if (downloadFile != null) {
+      downloadFile.state = DownloadFile.FILE_CANCEL;
+      downloadFile.future.cancel(false);
+      if (protoClients.containsKey(fileId)) {
+        protoClients.remove(fileId).forEach(MTProtoClient::close);
       }
-      return false;
-    });
+      if (downloadExecutorServiceMap.containsKey(downloadFile.fileId)) {
+        downloadExecutorServiceMap.remove(downloadFile.fileId).shutdownNow();
+      }
+    }
+
     if (downloadManager != null) {
       downloadManager.remove(fileId);
     }
   }
 
   public void pause(long fileId) {
-    downloadFiles.removeIf((downloadFile) -> {
-      if (downloadFile.fileId == fileId) {
-        downloadFile.state = DownloadFile.FILE_CANCEL;
-        if (downloadManager != null) {
-          downloadManager.addFile(downloadFile);
-        }
-        if (futures.containsKey(downloadFile.fileId)) {
-          futures.remove(downloadFile.fileId).cancel(true);
-        }
-        if (protoClients.containsKey(fileId)) {
-          protoClients.remove(fileId).forEach(MTProtoClient::close);
-        }
-        if (downloadExecutorServiceMap.containsKey(downloadFile.fileId)) {
-          downloadExecutorServiceMap.remove(downloadFile.fileId).shutdownNow();
-        }
-        return true;
+    DownloadFile downloadFile = downloadFiles.get(fileId);
+    if (downloadFile.fileId == fileId) {
+      downloadFile.state = DownloadFile.FILE_CANCEL;
+      if (downloadManager != null) {
+        downloadManager.addFile(downloadFile);
       }
-      return false;
-    });
+      downloadFile.future.cancel(false);
+      if (protoClients.containsKey(fileId)) {
+        protoClients.remove(fileId).forEach(MTProtoClient::close);
+      }
+      if (downloadExecutorServiceMap.containsKey(downloadFile.fileId)) {
+        downloadExecutorServiceMap.remove(downloadFile.fileId).shutdownNow();
+      }
+    }
   }
 
   public void close() {
-    for (DownloadFile downloadFile : downloadFiles) {
+    downloadFiles.forEach(((fileId, downloadFile) -> {
       downloadFile.state = DownloadFile.FILE_CANCEL;
-      if (futures.containsKey(downloadFile.fileId)) {
-        futures.remove(downloadFile.fileId).cancel(true);
-      }
+      downloadFile.future.cancel(false);
       if (protoClients.containsKey(downloadFile.fileId)) {
         protoClients.remove(downloadFile.fileId).forEach(MTProtoClient::close);
       }
       if (downloadExecutorServiceMap.containsKey(downloadFile.fileId)) {
         downloadExecutorServiceMap.remove(downloadFile.fileId).shutdownNow();
       }
-    }
+    }));
     downloadFiles.clear();
     if (executorService != null) {
       executorService.shutdownNow();

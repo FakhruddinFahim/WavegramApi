@@ -200,19 +200,15 @@ public class MTProtoClient extends TcpSocket {
     host = dcOption.ip_address;
     port = dcOption.port;
 
-    if (executor != null) {
-      executor.shutdownNow();
+    if (executor == null || executor.isShutdown()) {
+      executor = Executors.newCachedThreadPool();
     }
-    if (writeExecutor != null) {
-      writeExecutor.shutdownNow();
+    if (writeExecutor == null || writeExecutor.isShutdown()) {
+      writeExecutor = Executors.newSingleThreadExecutor();
     }
-    if (scheduledExecutor != null) {
-      scheduledExecutor.shutdownNow();
+    if (scheduledExecutor == null || scheduledExecutor.isShutdown()) {
+      scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
     }
-
-    executor = Executors.newCachedThreadPool();
-    writeExecutor = Executors.newSingleThreadExecutor();
-    scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
 
     executor.execute(() -> {
       try {
@@ -232,6 +228,7 @@ public class MTProtoClient extends TcpSocket {
     createTempAuthKey = false;
     authRetryId = -1;
     reconnectAttemptCount = 0;
+    isReconnecting = false;
     isConnected = true;
     try {
       if (protocol instanceof WebSocketProtocol) {
@@ -295,7 +292,8 @@ public class MTProtoClient extends TcpSocket {
         reqPqMulti.nonce = CryptoUtils.randomBytes(16);
         executeAuth(reqPqMulti);
       }
-      loop();
+
+      executor.execute(this::loop);
     } catch (Exception e) {
       Logger.logger.loge(e.getMessage());
       reconnect();
@@ -352,12 +350,12 @@ public class MTProtoClient extends TcpSocket {
                 recvMessages.put(item.messageId, item);
                 onMessage(item);
               } else {
-                Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + item + "\n\tolder msg: " + recvMessages.get(item.messageId) + "\n\tobject: " + TLContext.read(item.messageData) + "\n");
+                Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + item + "\n\told msg: " + recvMessages.get(item.messageId) + "\n\tobject: " + TLContext.read(item.messageData) + "\n");
               }
             }
             recvMessages.put(message.messageId, message);
           } else {
-            Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + message + "\n\tolder msg: " + recvMessages.get(message.messageId) + "\n\tobject: " + TLContext.read(message.messageData) + "\n");
+            Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + message + "\n\told msg: " + recvMessages.get(message.messageId) + "\n\tobject: " + TLContext.read(message.messageData) + "\n");
           }
 
         } else {
@@ -365,7 +363,7 @@ public class MTProtoClient extends TcpSocket {
             recvMessages.put(message.messageId, message);
             onMessage(message);
           } else {
-            Logger.logger.logw("msgId exists or lower than all stored msgs, ignored msg: " + message + " older msg: " + recvMessages.get(message.messageId) + ", object: " + TLContext.read(message.messageData));
+            Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + message + "\n\told msg: " + recvMessages.get(message.messageId) + "\n\tobject: " + TLContext.read(message.messageData));
           }
         }
         if (message.authKeyId != 0) {
@@ -376,7 +374,6 @@ public class MTProtoClient extends TcpSocket {
         }
       }
     } catch (Exception e) {
-      e.printStackTrace();
       Logger.logger.loge(e.getMessage());
       reconnect();
     }
@@ -456,20 +453,22 @@ public class MTProtoClient extends TcpSocket {
 
     isReconnecting = reconnectLimit == -1 || reconnectLimit > 0;
     super.close();
+    if (protoCallback != null) {
+      protoCallback.onClose();
+    }
     isConnected = isReconnecting;
 
     while ((reconnectLimit > reconnectAttemptCount || reconnectLimit == -1) && isConnected) {
       reconnectAttemptCount++;
       Logger.logger.logi("attempt " + reconnectAttemptCount);
-      if (protoCallback != null) {
-        protoCallback.onClose();
-      }
       try {
         if (open()) {
-          isReconnecting = false;
           onOpen();
           break;
         } else {
+          if (protoCallback != null) {
+            protoCallback.onClose();
+          }
           Thread.sleep(2000);
         }
       } catch (Exception e) {
@@ -684,7 +683,7 @@ public class MTProtoClient extends TcpSocket {
                 rpcResult.result.readParams(istream, context);
               } else {
                 istream.skip(-4);
-                rpcResult.result = (TLObject) method.readResult(istream, context);
+                rpcResult.result = method.readResult(istream, context);
               }
             } catch (Exception ignored) {
             }
@@ -807,10 +806,11 @@ public class MTProtoClient extends TcpSocket {
       if (message.seqNo % 2 == 1) {
         sendAck(message.messageId);
       }
+
+      removeStoredMsgs();
     } catch (Exception e) {
-      e.printStackTrace();
+      Logger.logger.loge("exception: " + e.getMessage());
     }
-    removeStoredMsgs();
   }
 
   protected void onInit() {
@@ -1237,6 +1237,9 @@ public class MTProtoClient extends TcpSocket {
       executeRpc(msgs_ack, RpcOptions.build().initRequired(false).dropAnswerAfterTimeout(false));
       msgs_ack.msg_ids.clear();
     } else {
+      if (scheduledExecutor.isShutdown()) {
+        return;
+      }
       msgsAckFuture = scheduledExecutor.schedule(() -> {
         executeRpc(msgs_ack, RpcOptions.build().initRequired(false).dropAnswerAfterTimeout(false));
         msgs_ack.msg_ids.clear();
@@ -1529,17 +1532,17 @@ public class MTProtoClient extends TcpSocket {
       tempAuthScheduleFuture.cancel(true);
     }
 
-    if (executor != null) {
-      executor.shutdownNow();
-    }
-    if (writeExecutor != null) {
-      writeExecutor.shutdownNow();
-    }
-    if (scheduledExecutor != null) {
-      scheduledExecutor.shutdownNow();
-    }
-
     if (!isReconnecting) {
+      if (executor != null) {
+        executor.shutdownNow();
+      }
+      if (writeExecutor != null) {
+        writeExecutor.shutdownNow();
+      }
+      if (scheduledExecutor != null) {
+        scheduledExecutor.shutdownNow();
+      }
+
       startFuture.complete(null);
     }
 
