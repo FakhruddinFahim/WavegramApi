@@ -6,10 +6,10 @@ import com.fakhruddin.mtproto.protocol.Protocol;
 import com.fakhruddin.mtproto.protocol.WebSocketProtocol;
 import com.fakhruddin.mtproto.tl.*;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
-import com.fakhruddin.mtproto.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -26,6 +26,7 @@ import java.util.zip.GZIPInputStream;
 
 public class MTProtoClient extends TcpSocket {
   private static final String TAG = MTProtoClient.class.getSimpleName();
+  private static final Logger logger = LogManager.getLogger(MTProtoClient.class);
 
   public List<RSA> rsaPublicRsaKeys = new ArrayList<>();
   public MTProtoScheme.P_Q_inner_dataType pqInnerData;
@@ -292,7 +293,7 @@ public class MTProtoClient extends TcpSocket {
 
       executor.execute(this::loop);
     } catch (Exception e) {
-      Logger.logger.loge(e.getMessage());
+      logger.error("error", e);
       reconnect();
     }
   }
@@ -323,14 +324,16 @@ public class MTProtoClient extends TcpSocket {
           int currentTime = (int) (session.getServerTime() / 1000);
           int sec = currentTime - time;
           if (sec > 300) {
-            Logger.logger.logw("msg time: " + new Date(time * 1000L) + ", server time: " + new Date(currentTime * 1000L) + " ignored msg: " + message + "\n");
+            logger.warn("msg time: {}, server time: {}\n\tignored msg: {}", new Date(time * 1000L),
+              new Date(currentTime * 1000L), message);
             return;
           } else if (sec < -30) {
-            Logger.logger.logw("msg time: " + new Date(time * 1000L) + ", server time: " + new Date(currentTime * 1000L) + "\n\tignored msg: " + message + "\n");
+            logger.warn("msg time: {}, server time: {}\n\tignored msg: {}", new Date(time * 1000L),
+              new Date(currentTime * 1000L), message);
             return;
           }
           if (session.sessionId != message.sessionId) {
-            Logger.logger.logw("sessionId does not matched\n\tignored msg: " + message + "\n");
+            logger.warn("sessionId does not matched\n\tignored msg: {}", message);
             return;
           }
         }
@@ -347,12 +350,14 @@ public class MTProtoClient extends TcpSocket {
                 recvMessages.put(item.messageId, item);
                 onMessage(item);
               } else {
-                Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + item + "\n\told msg: " + recvMessages.get(item.messageId) + "\n\tobject: " + TLContext.read(item.messageData) + "\n");
+                logger.warn("msgId exists or lower than all stored msgs\n\tignored msg: {}\n\told msg: {}\n\tobject: {}",
+                  item, recvMessages.get(item.messageId), TLContext.read(item.messageData));
               }
             }
             recvMessages.put(message.messageId, message);
           } else {
-            Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + message + "\n\told msg: " + recvMessages.get(message.messageId) + "\n\tobject: " + TLContext.read(message.messageData) + "\n");
+            logger.warn("msgId exists or lower than all stored msgs\n\tignored msg: {}\n\told msg: {}\n\tobject: {}",
+              message, recvMessages.get(message.messageId), TLContext.read(message.messageData));
           }
 
         } else {
@@ -360,7 +365,8 @@ public class MTProtoClient extends TcpSocket {
             recvMessages.put(message.messageId, message);
             onMessage(message);
           } else {
-            Logger.logger.logw("msgId exists or lower than all stored msgs\n\tignored msg: " + message + "\n\told msg: " + recvMessages.get(message.messageId) + "\n\tobject: " + TLContext.read(message.messageData));
+            logger.warn("msgId exists or lower than all stored msgs\n\tignored msg: {}\n\told msg: {}\n\tobject: {}",
+              message, recvMessages.get(message.messageId), TLContext.read(message.messageData));
           }
         }
         if (message.authKeyId != 0) {
@@ -371,7 +377,7 @@ public class MTProtoClient extends TcpSocket {
         }
       }
     } catch (Exception e) {
-      Logger.logger.loge(e.getMessage());
+      logger.error("error", e);
       reconnect();
     }
   }
@@ -457,7 +463,7 @@ public class MTProtoClient extends TcpSocket {
 
     while ((reconnectLimit > reconnectAttemptCount || reconnectLimit == -1) && isConnected) {
       reconnectAttemptCount++;
-      Logger.logger.logi("attempt " + reconnectAttemptCount);
+      logger.info("attempt: {}", reconnectAttemptCount);
       if (open()) {
         onOpen();
         break;
@@ -504,7 +510,7 @@ public class MTProtoClient extends TcpSocket {
       TLInputStream istream = new TLInputStream(message.messageData);
       TLObject object = context.readConstructor(istream);
       if (!(object instanceof MTProtoScheme.rpc_result)) {
-        Logger.logger.logd("\n\tmsg: " + message + "\n\tobject: " + object + "\n");
+        logger.debug("\n\tmsg: {}\n\tobject: {}", message, object);
       }
       switch (object) {
         case MTProtoScheme.resPQ resPQ -> processResPQ(resPQ);
@@ -700,7 +706,7 @@ public class MTProtoClient extends TcpSocket {
                 onMessageEntry.getValue().object(rpcResult.result);
               }
             }
-            Logger.logger.logd("\n\tmsg: " + message + "\n\tobject: " + object + "\n");
+            logger.debug("\n\tmsg: {}\n\tobject: {}", message, object);
           }
         }
         case MTProtoScheme.destroy_session_ok destroySessionOk -> {
@@ -805,7 +811,7 @@ public class MTProtoClient extends TcpSocket {
 
       removeStoredMsgs();
     } catch (Exception e) {
-      Logger.logger.loge("exception: " + e.getMessage());
+      logger.error("error", e);
     }
   }
 
@@ -856,7 +862,7 @@ public class MTProtoClient extends TcpSocket {
   }
 
   private void computeAuthKey() throws Exception {
-    Logger.logger.logd("creating auth key\n");
+    logger.debug("creating auth key");
 
     //22047 < p < 22048
     //client secret integer
@@ -954,7 +960,7 @@ public class MTProtoClient extends TcpSocket {
       byte[] tempKeyXor = CryptoUtils.xor(tempKey, CryptoUtils.SHA256(aesEncrypted));
       byte[] keyAesEncrypted = CryptoUtils.concat(tempKeyXor, aesEncrypted);
       if (selectedPublicRsaKey.getModulus().compareTo(new BigInteger(1, keyAesEncrypted)) <= 0) {
-        Logger.logger.logw("keyAesEncrypted >= selectedPublicRsaModulus\n");
+        logger.warn("keyAesEncrypted >= selectedPublicRsaModulus");
         continue;
       }
 
@@ -1393,9 +1399,10 @@ public class MTProtoClient extends TcpSocket {
     }
 
     if (objects.size() == 1) {
-      Logger.logger.logd("dc_id: " + dcId + "\n\tmsg: " + info.message + "\n\tobject: " + objects.getFirst().toJSON() + "\n");
+      logger.debug("dc_id: {}\n\tmsg: {}\n\tobject: {}", dcId, info.message, objects.getFirst().toJSON());
     } else {
-      Logger.logger.logd("dc_id: " + dcId + "\n\tmsg: " + info.message + "\n\tobject: " + objects.stream().map((o) -> o.toJSON().toString()).collect(Collectors.joining(", ")) + "\n");
+      logger.debug("dc_id: {}\n\tmsg: {}\n\tobject: {}", dcId, info.message,
+        objects.stream().map((o) -> o.toJSON().toString()).collect(Collectors.joining(", ")));
     }
 
     container.messages.clear();
@@ -1470,7 +1477,7 @@ public class MTProtoClient extends TcpSocket {
         }
         protocol.writeMsg(this.outputStream, messageOutputStream.toByteArray());
       } catch (Exception e) {
-        Logger.logger.loge(e.getMessage() + "\n");
+        logger.error("error", e);
         sentMessages.remove(info.message.messageId);
         if (!isConnected && !isReconnecting) {
           MTProtoScheme.rpc_error rpcError = new MTProtoScheme.rpc_error();

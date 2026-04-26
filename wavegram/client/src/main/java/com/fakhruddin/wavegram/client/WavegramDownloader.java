@@ -6,8 +6,9 @@ import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLObject;
 import com.fakhruddin.mtproto.tl.TLOutputStream;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
-import com.fakhruddin.mtproto.utils.Logger;
 import com.fakhruddin.wavegram.tl.ApiScheme;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
@@ -21,6 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class WavegramDownloader {
   private static final String TAG = "WavegramDownloader";
+  private static final Logger logger = LogManager.getLogger(WavegramDownloader.class);
+
   private final WavegramClient wavegramClient;
   public static final int MIN_CHUNK_SIZE = 4096;
   public static final int MIN_CHUNK_SIZE_PRECISE = 1024;
@@ -163,7 +166,7 @@ public class WavegramDownloader {
         filename = photoFileLocation.id + ".jpg";
       }
     } else {
-      Logger.logger.loge("can't download, unsupported message\n");
+      logger.error("can't download, unsupported message");
       CompletableFuture<DownloadFile> future = new CompletableFuture<>();
       future.completeExceptionally(new RpcException(-1, "UNSUPPORTED_MESSAGE"));
       return future;
@@ -623,7 +626,7 @@ public class WavegramDownloader {
         if (downloadFile.downloadedSize == downloadFile.size - downloadFile.offset ||
           downloadFile.state == DownloadFile.FILE_COMPLETED) {
           downloadFile.state = DownloadFile.FILE_COMPLETED;
-          Logger.logger.logi("file: " + downloadFile + " completed\n");
+          logger.info("file: {} completed", downloadFile);
           if (downloadManager != null && !stream) {
             downloadManager.addFile(downloadFile);
           }
@@ -632,7 +635,7 @@ public class WavegramDownloader {
             downloadCallback.onComplete(downloadFile);
           }
         } else {
-          Logger.logger.loge("file: " + downloadFile + ", error: " + rpcError + "\n");
+          logger.error("file: {}, error: {}", downloadFile, rpcError);
           future.completeExceptionally(new RpcException(rpcError.get()));
           if (downloadCallback != null) {
             downloadCallback.onError(downloadFile, rpcError.get());

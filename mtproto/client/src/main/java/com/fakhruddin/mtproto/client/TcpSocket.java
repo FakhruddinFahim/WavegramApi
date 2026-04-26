@@ -1,6 +1,7 @@
 package com.fakhruddin.mtproto.client;
 
-import com.fakhruddin.mtproto.utils.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -16,6 +17,7 @@ import java.net.SocketException;
  */
 public class TcpSocket {
   private static final String TAG = "TcpSocket";
+  private static final Logger logger = LogManager.getLogger(TcpSocket.class);
 
   protected int port = -1;
   protected String host;
@@ -94,7 +96,7 @@ public class TcpSocket {
   }
 
   public boolean open() {
-    Logger.logger.logi(host + ":" + port + "\n");
+    logger.info("{}:{}", host, port);
     try {
       socket = new Socket();
       socket.setSoTimeout(timeout);

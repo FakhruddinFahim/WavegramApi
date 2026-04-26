@@ -20,11 +20,15 @@ import java.util.List;
 import java.util.*;
 import java.util.concurrent.*;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 /**
  * Created by Fakhruddin Fahim on 22/07/2022
  */
 public class WavegramClient extends MTProtoClient {
   private static final String TAG = "WavegramClient";
+  private static final Logger logger = LogManager.getLogger(WavegramClient.class.getName());
   public int apiId;
   public String apiHash;
   public String langCode;
@@ -175,13 +179,15 @@ public class WavegramClient extends MTProtoClient {
 
   @Override
   protected void onMessage(MTMessage message, TLObject object) {
-    if (object instanceof MTProtoScheme.rpc_result rpcResult &&
-      rpcResult.result instanceof MTProtoScheme.rpc_error rpcError) {
+    if (object instanceof MTProtoScheme.rpc_result rpcResult && rpcResult.result instanceof MTProtoScheme.rpc_error rpcError) {
       if (rpcError.error_message.equals("AUTH_KEY_UNREGISTERED")) {
         if (wavegramManager != null) {
           wavegramManager.removeUser();
         }
       }
+
+      String description = ApiError.getDescription(rpcError.error_message);
+      logger.error("rpc error: {}", description != null ? description : rpcError.error_message);
     }
 
     if (object instanceof ApiScheme.updates_ updates) {

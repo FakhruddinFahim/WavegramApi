@@ -9,24 +9,23 @@ import com.fakhruddin.mtproto.tl.TLContext;
 import com.fakhruddin.mtproto.tl.TLObject;
 import com.fakhruddin.mtproto.tl.TLVector;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
-import com.fakhruddin.mtproto.utils.Logger;
 import com.fakhruddin.wavegram.client.*;
 import com.fakhruddin.wavegram.tl.ApiContext;
 import com.fakhruddin.wavegram.tl.ApiError;
 import com.fakhruddin.wavegram.tl.ApiScheme;
 import com.fakhruddin.wavegram.tl.ApiSecretScheme;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-import java.io.FileOutputStream;
 import java.lang.management.ManagementFactory;
 import java.util.Scanner;
 import java.util.concurrent.ExecutionException;
 
 public class Main {
   private static final String TAG = Main.class.getSimpleName();
+  private static final Logger logger = LogManager.getLogger(Main.class);
 
   public static void main(String[] args) throws Exception {
-    Logger.logger = new Logger(new FileOutputStream("wavegram-client.log"));
-
     TLContext context = new ApiContext();
     context.layerNum = ApiScheme.LAYER_NUM;
     TLContext.context = context;
@@ -73,15 +72,10 @@ public class Main {
       @Override
       public void onMessage(TLObject object) {
         //All responses
-        if (object instanceof MTProtoScheme.rpc_result rpcResult && rpcResult.result instanceof MTProtoScheme.rpc_error rpcError) {
-          String description = ApiError.getDescription(rpcError.error_message);
-          System.err.println(TAG + ".onMessage: " + (description != null ? description : rpcError.error_message));
-        }
       }
 
       @Override
       public void onTransportError(TransportError error) {
-        System.out.println(TAG + ".onTransportError: " + error);
       }
 
       @Override
@@ -186,22 +180,22 @@ public class Main {
 
     if (!wavegramClient.isLoggedIn()) {
       //User login
-      System.out.print(TAG + ".main: Enter phone number: ");
-      String phoneNumber = new Scanner(System.in).nextLine();
+      logger.info("Enter phone number: ");
+      Scanner scanner = new Scanner(System.in);
+      String phoneNumber = scanner.nextLine();
       wavegramClient.sendCode(phoneNumber, object -> {
         if (object instanceof ApiScheme.auth.sentCode sentCode) {
           while (true) {
             System.out.print(TAG + ".main: Enter phone code: ");
-            String phoneCode = new Scanner(System.in).nextLine();
+            String phoneCode = scanner.nextLine();
             try {
               TLObject authorization = wavegramClient.signIn(phoneNumber, sentCode.phone_code_hash, phoneCode).get();
               if (authorization instanceof ApiScheme.auth.authorization authorization2) {
                 if (authorization2.user instanceof ApiScheme.user user) {
-                  System.out.println(TAG + ".main: You are logged in as " + user.first_name + " " + user.last_name + " (" + user.username + ")");
+                  logger.info("You are logged in as {} {} ({})", user.first_name, user.last_name, user.username);
                 }
                 break;
               } else if (authorization instanceof MTProtoScheme.rpc_error rpcError) {
-                System.err.println(TAG + ".main: " + ApiError.getDescription(rpcError.error_message));
                 if (rpcError.error_message.equals("PHONE_CODE_EMPTY") ||
                   rpcError.error_message.equals("PHONE_CODE_EXPIRED") ||
                   rpcError.error_message.equals("PHONE_CODE_INVALID")
@@ -212,7 +206,7 @@ public class Main {
                 }
               }
             } catch (InterruptedException | ExecutionException e) {
-              e.printStackTrace();
+              logger.error(e);
             }
           }
         } else if (object instanceof MTProtoScheme.rpc_error rpcError) {
@@ -222,16 +216,14 @@ public class Main {
 
 
       //Bot login
-      /*System.out.print(TAG + ".main: Enter bot token: ");
-      String botToken = new Scanner(System.in).nextLine();
+      /*logger.info("Enter bot token: ");
+      String botToken = scanner.nextLine();
       wavegramClient.signInAsBot(botToken, object -> {
-          if (object instanceof ApiScheme.NsAuth.Authorization2 authorization2) {
-              if (authorization2.user instanceof ApiScheme.User2 user) {
-                  System.out.println(TAG + ".signIn: You are logged in as " + user.firstName + " " + user.lastName + " (" + user.username + ")");
-              }
-          } else if (object instanceof MTProtoScheme.RpcError2 rpcError) {
-              System.err.println(TAG + ".main: " + ApiErrors.getDescription(rpcError.errorMessage));
+        if (object instanceof ApiScheme.auth.authorization authorization) {
+          if (authorization.user instanceof ApiScheme.user user) {
+            logger.info("You are logged in as {} {} ({})", user.first_name, user.last_name, user.username);
           }
+        }
       });*/
     }
 

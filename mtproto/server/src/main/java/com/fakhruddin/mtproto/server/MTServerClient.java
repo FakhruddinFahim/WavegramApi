@@ -4,6 +4,8 @@ import com.fakhruddin.mtproto.*;
 import com.fakhruddin.mtproto.protocol.*;
 import com.fakhruddin.mtproto.tl.*;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import javax.crypto.KeyAgreement;
 import javax.crypto.interfaces.DHPrivateKey;
@@ -26,7 +28,7 @@ import java.util.regex.Pattern;
  */
 public class MTServerClient {
   private static final String TAG = MTServerClient.class.getSimpleName();
-
+  private static final Logger logger = LogManager.getLogger(MTServerClient.class);
   private final InputStream inputStream;
   private final OutputStream outputStream;
   private AuthKey authKey;

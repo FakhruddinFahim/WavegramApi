@@ -4,16 +4,13 @@ import com.fakhruddin.mtproto.client.*;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLContext;
 import com.fakhruddin.mtproto.tl.TLObject;
-import com.fakhruddin.mtproto.utils.Logger;
 
-import java.io.FileOutputStream;
 import java.util.concurrent.ExecutionException;
 
 public class Main {
   private static final String TAG = Main.class.getSimpleName();
 
   public static void main(String[] args) throws Exception {
-    Logger.logger = new Logger(new FileOutputStream("mt-client.log"));
     TLContext.context = new TLContext();
     MTProtoClient client = new MTProtoClient(Config.getTelegramDcs());
     client.context = TLContext.context;

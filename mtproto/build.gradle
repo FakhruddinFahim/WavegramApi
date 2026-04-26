@@ -12,6 +12,9 @@ subprojects {
     api "org.json:json:20250107"
     api 'com.google.code.gson:gson:2.13.2'
     implementation "org.bouncycastle:bcpkix-jdk15on:1.70"
+    api platform("org.apache.logging.log4j:log4j-bom:2.25.4")
+    api "org.apache.logging.log4j:log4j-api"
+    api "org.apache.logging.log4j:log4j-core"
   }
 
   jar {
