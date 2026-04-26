@@ -1,12 +1,15 @@
 package com.fakhruddin.mtproto.tl;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 public abstract class TLObject {
+  protected static final Gson GSON = new GsonBuilder().serializeNulls().create();
+
   public boolean isBareType = false;
 
   public abstract int getId();

@@ -2,14 +2,12 @@
 package com.fakhruddin.mtproto.tl;
 
 import com.fakhruddin.mtproto.MTMessage;
-import com.fakhruddin.mtproto.tl.*;
 
 import java.util.Base64;
 import java.util.Map;
 import java.util.LinkedHashMap;
 
 import com.google.gson.JsonObject;
-import com.google.gson.Gson;
 
 public class MTProtoScheme {
   public static final int LAYER_NUM = 0;
@@ -357,10 +355,10 @@ public class MTProtoScheme {
       DestroySessionResType a = null;
       switch (id) {
         case destroy_session_ok.ID:
-          a = new MTProtoScheme.destroy_session_ok();
+          a = new destroy_session_ok();
           break;
-        case MTProtoScheme.destroy_session_none.ID:
-          a = new MTProtoScheme.destroy_session_none();
+        case destroy_session_none.ID:
+          a = new destroy_session_none();
           break;
         default:
           a = null;
@@ -378,13 +376,13 @@ public class MTProtoScheme {
   public static abstract class NewSessionType extends TLObject {
     public static final String TYPE = "NewSession";
 
-    public static MTProtoScheme.NewSessionType readType(TLInputStream istream, TLContext context) throws Exception {
+    public static NewSessionType readType(TLInputStream istream, TLContext context) throws Exception {
       int id = istream.readInt();
       istream.skip(-4);
-      MTProtoScheme.NewSessionType a = null;
+      NewSessionType a = null;
       switch (id) {
-        case MTProtoScheme.new_session_created.ID:
-          a = new MTProtoScheme.new_session_created();
+        case new_session_created.ID:
+          a = new new_session_created();
           break;
         default:
           a = null;
@@ -402,13 +400,13 @@ public class MTProtoScheme {
   public static abstract class MessageContainerType extends TLObject {
     public static final String TYPE = "MessageContainer";
 
-    public static MTProtoScheme.MessageContainerType readType(TLInputStream istream, TLContext context) throws Exception {
+    public static MessageContainerType readType(TLInputStream istream, TLContext context) throws Exception {
       int id = istream.readInt();
       istream.skip(-4);
-      MTProtoScheme.MessageContainerType a = null;
+      MessageContainerType a = null;
       switch (id) {
-        case MTProtoScheme.msg_container.ID:
-          a = new MTProtoScheme.msg_container();
+        case msg_container.ID:
+          a = new msg_container();
           break;
         default:
           a = null;
@@ -426,12 +424,12 @@ public class MTProtoScheme {
   public static abstract class MessageType extends TLObject {
     public static final String TYPE = "Message";
 
-    public static MTProtoScheme.MessageType readType(TLInputStream istream, TLContext context) throws Exception {
+    public static MessageType readType(TLInputStream istream, TLContext context) throws Exception {
       int id = istream.readInt();
       istream.skip(-4);
-      MTProtoScheme.MessageType a = null;
+      MessageType a = null;
       switch (id) {
-        case MTProtoScheme.message.ID:
+        case message.ID:
           a = new MTProtoScheme.message();
           break;
         default:
@@ -752,11 +750,10 @@ public class MTProtoScheme {
       _json.put("@type", TYPE);
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
-      _json.put("pq", pq);
+      _json.put("pq", Base64.getEncoder().encodeToString(pq));
       _json.put("server_public_key_fingerprints", server_public_key_fingerprints.toJSON());
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -828,8 +825,7 @@ public class MTProtoScheme {
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
       _json.put("new_nonce", Base64.getEncoder().encodeToString(new_nonce));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -897,16 +893,15 @@ public class MTProtoScheme {
       _json.put("@id", getId());
       _json.put("@name", getName());
       _json.put("@type", TYPE);
-      _json.put("pq", pq);
-      _json.put("p", p);
-      _json.put("q", q);
+      _json.put("pq", Base64.getEncoder().encodeToString(pq));
+      _json.put("p", Base64.getEncoder().encodeToString(p));
+      _json.put("q", Base64.getEncoder().encodeToString(q));
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
       _json.put("new_nonce", Base64.getEncoder().encodeToString(new_nonce));
       _json.put("dc", dc);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -982,8 +977,7 @@ public class MTProtoScheme {
       _json.put("new_nonce", Base64.getEncoder().encodeToString(new_nonce));
       _json.put("expires_in", expires_in);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1054,17 +1048,16 @@ public class MTProtoScheme {
       _json.put("@id", getId());
       _json.put("@name", getName());
       _json.put("@type", TYPE);
-      _json.put("pq", pq);
-      _json.put("p", p);
-      _json.put("q", q);
+      _json.put("pq", Base64.getEncoder().encodeToString(pq));
+      _json.put("p", Base64.getEncoder().encodeToString(p));
+      _json.put("q", Base64.getEncoder().encodeToString(q));
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
       _json.put("new_nonce", Base64.getEncoder().encodeToString(new_nonce));
       _json.put("dc", dc);
       _json.put("expires_in", expires_in);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1122,10 +1115,9 @@ public class MTProtoScheme {
       _json.put("@type", TYPE);
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
-      _json.put("encrypted_answer", encrypted_answer);
+      _json.put("encrypted_answer", Base64.getEncoder().encodeToString(encrypted_answer));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1193,12 +1185,11 @@ public class MTProtoScheme {
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
       _json.put("g", g);
-      _json.put("dh_prime", dh_prime);
-      _json.put("g_a", g_a);
+      _json.put("dh_prime", Base64.getEncoder().encodeToString(dh_prime));
+      _json.put("g_a", Base64.getEncoder().encodeToString(g_a));
       _json.put("server_time", server_time);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1260,10 +1251,9 @@ public class MTProtoScheme {
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
       _json.put("retry_id", retry_id);
-      _json.put("g_b", g_b);
+      _json.put("g_b", Base64.getEncoder().encodeToString(g_b));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1323,8 +1313,7 @@ public class MTProtoScheme {
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
       _json.put("new_nonce_hash1", Base64.getEncoder().encodeToString(new_nonce_hash1));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1384,8 +1373,7 @@ public class MTProtoScheme {
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
       _json.put("new_nonce_hash2", Base64.getEncoder().encodeToString(new_nonce_hash2));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1445,8 +1433,7 @@ public class MTProtoScheme {
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
       _json.put("new_nonce_hash3", Base64.getEncoder().encodeToString(new_nonce_hash3));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1514,8 +1501,7 @@ public class MTProtoScheme {
       _json.put("temp_session_id", temp_session_id);
       _json.put("expires_at", expires_at);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1571,8 +1557,7 @@ public class MTProtoScheme {
       _json.put("req_msg_id", req_msg_id);
       _json.put("result", result.toJSON());
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1628,8 +1613,7 @@ public class MTProtoScheme {
       _json.put("error_code", error_code);
       _json.put("error_message", error_message);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1677,8 +1661,7 @@ public class MTProtoScheme {
       _json.put("@name", getName());
       _json.put("@type", TYPE);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1726,8 +1709,7 @@ public class MTProtoScheme {
       _json.put("@name", getName());
       _json.put("@type", TYPE);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1787,8 +1769,7 @@ public class MTProtoScheme {
       _json.put("seq_no", seq_no);
       _json.put("bytes", bytes);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1848,8 +1829,7 @@ public class MTProtoScheme {
       _json.put("valid_until", valid_until);
       _json.put("salt", salt);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1913,8 +1893,7 @@ public class MTProtoScheme {
       _json.put("now", now);
       _json.put("salts", salts.toJSON());
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -1970,8 +1949,7 @@ public class MTProtoScheme {
       _json.put("msg_id", msg_id);
       _json.put("ping_id", ping_id);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2023,8 +2001,7 @@ public class MTProtoScheme {
       _json.put("@type", TYPE);
       _json.put("session_id", session_id);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2076,8 +2053,7 @@ public class MTProtoScheme {
       _json.put("@type", TYPE);
       _json.put("session_id", session_id);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2137,8 +2113,7 @@ public class MTProtoScheme {
       _json.put("unique_id", unique_id);
       _json.put("server_salt", server_salt);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2193,8 +2168,7 @@ public class MTProtoScheme {
       _json.put("@type", TYPE);
       _json.put("messages", messages.toJSON());
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2258,8 +2232,7 @@ public class MTProtoScheme {
       _json.put("bytes", bytes);
       _json.put("body", body.toJSON());
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2309,10 +2282,9 @@ public class MTProtoScheme {
       _json.put("@id", getId());
       _json.put("@name", getName());
       _json.put("@type", TYPE);
-      _json.put("packed_data", packed_data);
+      _json.put("packed_data", Base64.getEncoder().encodeToString(packed_data));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2365,8 +2337,7 @@ public class MTProtoScheme {
       _json.put("@type", TYPE);
       _json.put("msg_ids", msg_ids.toJSON());
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2426,8 +2397,7 @@ public class MTProtoScheme {
       _json.put("bad_msg_seqno", bad_msg_seqno);
       _json.put("error_code", error_code);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2491,8 +2461,7 @@ public class MTProtoScheme {
       _json.put("error_code", error_code);
       _json.put("new_server_salt", new_server_salt);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2545,8 +2514,7 @@ public class MTProtoScheme {
       _json.put("@type", TYPE);
       _json.put("msg_ids", msg_ids.toJSON());
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2599,8 +2567,7 @@ public class MTProtoScheme {
       _json.put("@type", TYPE);
       _json.put("msg_ids", msg_ids.toJSON());
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2654,10 +2621,9 @@ public class MTProtoScheme {
       _json.put("@name", getName());
       _json.put("@type", TYPE);
       _json.put("req_msg_id", req_msg_id);
-      _json.put("info", info);
+      _json.put("info", Base64.getEncoder().encodeToString(info));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2712,10 +2678,9 @@ public class MTProtoScheme {
       _json.put("@name", getName());
       _json.put("@type", TYPE);
       _json.put("msg_ids", msg_ids.toJSON());
-      _json.put("info", info);
+      _json.put("info", Base64.getEncoder().encodeToString(info));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2779,8 +2744,7 @@ public class MTProtoScheme {
       _json.put("bytes", bytes);
       _json.put("status", status);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2840,8 +2804,7 @@ public class MTProtoScheme {
       _json.put("bytes", bytes);
       _json.put("status", status);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2889,8 +2852,7 @@ public class MTProtoScheme {
       _json.put("@name", getName());
       _json.put("@type", TYPE);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2938,8 +2900,7 @@ public class MTProtoScheme {
       _json.put("@name", getName());
       _json.put("@type", TYPE);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -2987,8 +2948,7 @@ public class MTProtoScheme {
       _json.put("@name", getName());
       _json.put("@type", TYPE);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3048,8 +3008,7 @@ public class MTProtoScheme {
       _json.put("wait_after", wait_after);
       _json.put("max_wait", max_wait);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3107,8 +3066,7 @@ public class MTProtoScheme {
       _json.put("@return_type", RETURN_TYPE);
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3166,8 +3124,7 @@ public class MTProtoScheme {
       _json.put("@return_type", RETURN_TYPE);
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3240,13 +3197,12 @@ public class MTProtoScheme {
       _json.put("@return_type", RETURN_TYPE);
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
-      _json.put("p", p);
-      _json.put("q", q);
+      _json.put("p", Base64.getEncoder().encodeToString(p));
+      _json.put("q", Base64.getEncoder().encodeToString(q));
       _json.put("public_key_fingerprint", public_key_fingerprint);
-      _json.put("encrypted_data", encrypted_data);
+      _json.put("encrypted_data", Base64.getEncoder().encodeToString(encrypted_data));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3310,10 +3266,9 @@ public class MTProtoScheme {
       _json.put("@return_type", RETURN_TYPE);
       _json.put("nonce", Base64.getEncoder().encodeToString(nonce));
       _json.put("server_nonce", Base64.getEncoder().encodeToString(server_nonce));
-      _json.put("encrypted_data", encrypted_data);
+      _json.put("encrypted_data", Base64.getEncoder().encodeToString(encrypted_data));
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3371,8 +3326,7 @@ public class MTProtoScheme {
       _json.put("@return_type", RETURN_TYPE);
       _json.put("req_msg_id", req_msg_id);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3430,8 +3384,7 @@ public class MTProtoScheme {
       _json.put("@return_type", RETURN_TYPE);
       _json.put("num", num);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3489,8 +3442,7 @@ public class MTProtoScheme {
       _json.put("@return_type", RETURN_TYPE);
       _json.put("ping_id", ping_id);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3552,8 +3504,7 @@ public class MTProtoScheme {
       _json.put("ping_id", ping_id);
       _json.put("disconnect_delay", disconnect_delay);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3611,8 +3562,7 @@ public class MTProtoScheme {
       _json.put("@return_type", RETURN_TYPE);
       _json.put("session_id", session_id);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
@@ -3666,8 +3616,7 @@ public class MTProtoScheme {
       _json.put("@name", getName());
       _json.put("@return_type", RETURN_TYPE);
 
-      Gson gson = new Gson();
-      return gson.toJsonTree(_json).getAsJsonObject();
+      return GSON.toJsonTree(_json).getAsJsonObject();
     }
 
     @Override
