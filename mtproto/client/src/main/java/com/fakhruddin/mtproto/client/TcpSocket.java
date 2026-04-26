@@ -93,26 +93,29 @@ public class TcpSocket {
     return open();
   }
 
-  public boolean open() throws Exception {
+  public boolean open() {
     Logger.logger.logi(host + ":" + port + "\n");
-    socket = new Socket();
-    socket.setSoTimeout(timeout);
-    socket.setReceiveBufferSize(bufferSize);
-    socket.setSendBufferSize(bufferSize);
-    socket.setKeepAlive(true);
-    if (proxyHost != null) {
-      socket.connect(new InetSocketAddress(proxyHost, proxyPort));
-    } else {
-      socket.connect(new InetSocketAddress(host, port));
-    }
-    if (socket.isConnected()) {
-      inputStream = socket.getInputStream();
-      outputStream = socket.getOutputStream();
+    try {
+      socket = new Socket();
+      socket.setSoTimeout(timeout);
+      socket.setReceiveBufferSize(bufferSize);
+      socket.setSendBufferSize(bufferSize);
+      socket.setKeepAlive(true);
       if (proxyHost != null) {
-        connectToProxy();
+        socket.connect(new InetSocketAddress(proxyHost, proxyPort));
+      } else {
+        socket.connect(new InetSocketAddress(host, port));
       }
+      if (socket.isConnected()) {
+        inputStream = socket.getInputStream();
+        outputStream = socket.getOutputStream();
+        if (proxyHost != null) {
+          connectToProxy();
+        }
+      }
+      isConnected = true;
+    } catch (IOException ignored) {
     }
-    isConnected = true;
     return isConnected;
   }
 

@@ -9,6 +9,7 @@ import com.fakhruddin.mtproto.utils.CryptoUtils;
 import com.fakhruddin.mtproto.utils.Logger;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -211,15 +212,11 @@ public class MTProtoClient extends TcpSocket {
     }
 
     executor.execute(() -> {
-      try {
-        if (!open()) {
-          reconnect();
-          return;
-        }
-        onOpen();
-      } catch (Exception e) {
-        e.printStackTrace();
+      if (!open()) {
+        reconnect();
+        return;
       }
+      onOpen();
     });
     return startFuture;
   }
@@ -461,18 +458,17 @@ public class MTProtoClient extends TcpSocket {
     while ((reconnectLimit > reconnectAttemptCount || reconnectLimit == -1) && isConnected) {
       reconnectAttemptCount++;
       Logger.logger.logi("attempt " + reconnectAttemptCount);
-      try {
-        if (open()) {
-          onOpen();
-          break;
-        } else {
-          if (protoCallback != null) {
-            protoCallback.onClose();
-          }
-          Thread.sleep(2000);
+      if (open()) {
+        onOpen();
+        break;
+      } else {
+        if (protoCallback != null) {
+          protoCallback.onClose();
         }
-      } catch (Exception e) {
-        e.printStackTrace();
+        try {
+          Thread.sleep(2000);
+        } catch (InterruptedException ignored) {
+        }
       }
     }
 
