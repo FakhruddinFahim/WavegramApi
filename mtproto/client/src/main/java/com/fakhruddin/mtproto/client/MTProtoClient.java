@@ -65,7 +65,7 @@ public class MTProtoClient extends TcpSocket {
 
   protected volatile boolean isConnected = false;
   private boolean isReconnecting = false;
-  private int reconnectLimit = -1;
+  public int reconnectLimit = -1;
   private int reconnectAttemptCount = 0;
   public boolean isInited = false;
   public boolean tempSession = false;
@@ -1547,25 +1547,22 @@ public class MTProtoClient extends TcpSocket {
       }
 
       startFuture.complete(null);
+
+      MTProtoScheme.rpc_error error = new MTProtoScheme.rpc_error();
+      error.error_code = -1;
+      error.error_message = "CONNECTION_CLOSED";
+
+      sentMessages.entrySet().removeIf((entry) -> {
+        entry.getValue().cancelTimeout();
+        if (entry.getValue().options.callback != null) {
+          entry.getValue().options.callback.object(error);
+        }
+        if (!entry.getValue().future.isDone()) {
+          entry.getValue().future.completeExceptionally(new RpcException(error));
+        }
+        return true;
+      });
     }
-
-    MTProtoScheme.rpc_error error = new MTProtoScheme.rpc_error();
-    error.error_code = -1;
-    error.error_message = "CONNECTION_CLOSED";
-
-    sentMessages.entrySet().removeIf((entry) -> {
-      if (entry.getValue().resent && isReconnecting) {
-        return false;
-      }
-      entry.getValue().cancelTimeout();
-      if (entry.getValue().options.callback != null) {
-        entry.getValue().options.callback.object(error);
-      }
-      if (!entry.getValue().future.isDone()) {
-        entry.getValue().future.completeExceptionally(new RpcException(error));
-      }
-      return true;
-    });
 
     onClose();
     if (protoCallback != null) {
