@@ -10,9 +10,14 @@ import com.fakhruddin.wavegram.tl.ApiScheme;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -35,7 +40,6 @@ public class WavegramDownloader {
   int threadPerDownload = 2;
   private final Map<Long, List<MTProtoClient>> protoClients = new HashMap<>();
   private final Map<Long, DownloadFile> downloadFiles = Collections.synchronizedMap(new LinkedHashMap<>());
-  private final Map<Long, ExecutorService> downloadExecutorServiceMap = new HashMap<>();
   private String rootPath = "";
 
   public static class DownloadFile {
@@ -172,7 +176,8 @@ public class WavegramDownloader {
       return future;
     }
 
-    return download(inputFileLocation, dcId, 1024 * 1024, 0, fileSize, rootPath + filename, false);
+    assert filename != null;
+    return download(inputFileLocation, dcId, 1024 * 1024, 0, fileSize, Path.of(rootPath, filename).toString(), false);
   }
 
   public CompletableFuture<DownloadFile> download(ApiScheme.InputFileLocationType inputFileLocation, int dcId, long partSize, long offset,
@@ -242,31 +247,35 @@ public class WavegramDownloader {
           threadCount = threadPerDownload;
         }
 
-        CountDownLatch firstLatch = new CountDownLatch(1);
-
-        AtomicReference<RandomAccessFile> randomAccessFile = new AtomicReference<>(null);
-        if (outputStream == null) {
-          randomAccessFile.set(new RandomAccessFile(downloadFile.filepath, "rw"));
+        AtomicReference<FileOutputStream> fileOutputStream = new AtomicReference<>(null);
+        if (outputStream instanceof FileOutputStream fo) {
+          fileOutputStream.set(fo);
+        } else if (outputStream == null) {
+          fileOutputStream.set(new FileOutputStream(downloadFile.filepath, true));
           if (downloadFile.size > 0) {
-            randomAccessFile.get().setLength(downloadFile.size - downloadFile.offset);
+            FileChannel fileChannel = fileOutputStream.get().getChannel();
+            fileChannel.truncate(downloadFile.size - downloadFile.offset);
           }
         } else {
           threadCount = 1;
         }
 
+        CountDownLatch firstLatch = new CountDownLatch(1);
+
         AtomicReference<MTProtoScheme.rpc_error> rpcError = new AtomicReference<>(new MTProtoScheme.rpc_error());
         rpcError.get().error_code = -1;
+        rpcError.get().error_message = "";
 
         AtomicReference<ApiScheme.upload.fileCdnRedirect> fileCdnRedirect = new AtomicReference<>(null);
 
         ExecutorService downloadExecutorService = Executors.newFixedThreadPool(threadCount);
-        downloadExecutorServiceMap.put(downloadFile.fileId, downloadExecutorService);
         List<Future<?>> downloadFutures = new ArrayList<>();
         for (int i = 0; i < threadCount; i++) {
           MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
           protoClient.context = wavegramClient.context;
           protoClient.sentMsgCacheLimit = 5;
           protoClient.recvMsgCacheLimit = 5;
+          protoClient.reconnectLimit = 5;
           protoClient.tempSession = true;
           protoClient.dcId = downloadFile.dcId;
           protoClient.setClientManager(wavegramClient.getClientManager());
@@ -279,7 +288,6 @@ public class WavegramDownloader {
             protoClient.rsaPublicRsaKeys = wavegramClient.rsaPublicRsaKeys;
           }
           Future<?> startFuture = protoClient.start();
-          int finalI = i;
 
           if (protoClients.containsKey(downloadFile.fileId)) {
             protoClients.get(downloadFile.fileId).add(protoClient);
@@ -365,6 +373,7 @@ public class WavegramDownloader {
             }
           }
 
+          int finalI = i;
           int finalThreadCount = threadCount;
           Future<?> downloadFuture = downloadExecutorService.submit(() -> {
             ApiScheme.upload.getCdnFile getCdnFile = new ApiScheme.upload.getCdnFile();
@@ -467,47 +476,31 @@ public class WavegramDownloader {
               try {
                 TLObject object = getFileFuture.get();
                 synchronized (downloadFile) {
-                  long expectedLength = bytesLength < bytesOffset ? bytesLength : (bytesLength - bytesOffset);
-
                   if (object instanceof ApiScheme.upload.file file) {
-                    if (randomAccessFile.get() != null) {
-                      randomAccessFile.get().seek((getFile.offset + bytesOffset) - downloadFile.offset);
-                    }
-                    if (bytesOffset + expectedLength == file.bytes.length) {
-                      if (outputStream != null) {
-                        outputStream.write(file.bytes, (int) bytesOffset, (int) expectedLength);
-                      } else {
-                        randomAccessFile.get().write(file.bytes, (int) bytesOffset, (int) expectedLength);
-                      }
-                      downloadFile.downloadedSize += expectedLength;
-                      longs[1] += expectedLength;
-                      downloadFile.downloadedParts.put(finalI, longs);
-                      if (downloadCallback != null) {
-                        downloadCallback.onProgress(downloadFile, (getFile.offset + bytesOffset), expectedLength,
-                          ByteBuffer.wrap(file.bytes, (int) bytesOffset, (int) expectedLength).array(), downloadFile.downloadedSize);
-                      }
+                    long length = Math.min(bytesLength, file.bytes.length - bytesOffset);
+                    if (fileOutputStream.get() != null) {
+                      FileChannel channel = fileOutputStream.get().getChannel();
+                      channel.write(ByteBuffer.wrap(file.bytes, (int) bytesOffset, (int) length),
+                        (getFile.offset + bytesOffset) - downloadFile.offset);
                     } else {
-                      if (outputStream != null) {
-                        outputStream.write(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset));
-                      } else {
-                        randomAccessFile.get().write(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset));
-                      }
-                      downloadFile.downloadedSize += file.bytes.length - bytesOffset;
-                      longs[1] += file.bytes.length - bytesOffset;
-                      downloadFile.downloadedParts.put(finalI, longs);
-                      if (downloadCallback != null) {
-                        downloadCallback.onProgress(downloadFile, (getFile.offset + bytesOffset), (int) (file.bytes.length - bytesOffset),
-                          ByteBuffer.wrap(file.bytes, (int) bytesOffset, (int) (file.bytes.length - bytesOffset)).array(), downloadFile.downloadedSize);
-                      }
-                      firstLatch.countDown();
-                      downloadFile.state = DownloadFile.FILE_COMPLETED;
-                      break;
+                      assert outputStream != null;
+                      outputStream.write(file.bytes, (int) bytesOffset, (int) length);
                     }
 
+                    downloadFile.downloadedSize += length;
+                    longs[1] += length;
+                    downloadFile.downloadedParts.put(finalI, longs);
                     if (downloadManager != null && !stream) {
                       downloadManager.addFile(downloadFile);
                     }
+                    if (downloadCallback != null) {
+                      downloadCallback.onProgress(downloadFile, getFile.offset + bytesOffset, length,
+                        ByteBuffer.wrap(file.bytes, (int) bytesOffset, (int) length).array(), downloadFile.downloadedSize);
+                    }
                     getFile.offset += getFile.limit;
+                    if (file.bytes.length < bytesLength) {
+                      break;
+                    }
                   } else if (object instanceof ApiScheme.upload.cdnFile cdnFile) {
                     TLOutputStream aesKey = new TLOutputStream();
                     aesKey.write(fileCdnRedirect.get().encryption_iv, 0, fileCdnRedirect.get().encryption_iv.length - 4);
@@ -515,45 +508,30 @@ public class WavegramDownloader {
                     byte[] bytes = CryptoUtils.AES256CTRDecrypt(cdnFile.bytes, fileCdnRedirect.get().encryption_key,
                       aesKey.toByteArray());
 
-                    if (randomAccessFile.get() != null) {
-                      randomAccessFile.get().seek((getFile.offset + bytesOffset) - downloadFile.offset);
-                    }
-
-                    if (bytesOffset + expectedLength == bytes.length) {
-                      if (outputStream != null) {
-                        outputStream.write(bytes, (int) bytesOffset, (int) expectedLength);
-                      } else {
-                        randomAccessFile.get().write(bytes, (int) bytesOffset, (int) expectedLength);
-                      }
-                      downloadFile.downloadedSize += expectedLength;
-                      longs[1] += expectedLength;
-                      downloadFile.downloadedParts.put(finalI, longs);
-                      if (downloadCallback != null) {
-                        downloadCallback.onProgress(downloadFile, (getFile.offset + bytesOffset), expectedLength,
-                          ByteBuffer.wrap(bytes, (int) bytesOffset, (int) expectedLength).array(), downloadFile.downloadedSize);
-                      }
+                    long length = Math.min(bytesLength, bytes.length - bytesOffset);
+                    if (fileOutputStream.get() != null) {
+                      FileChannel channel = fileOutputStream.get().getChannel();
+                      channel.write(ByteBuffer.wrap(bytes, (int) bytesOffset, (int) length),
+                        (getFile.offset + bytesOffset) - downloadFile.offset);
                     } else {
-                      if (outputStream != null) {
-                        outputStream.write(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset));
-                      } else {
-                        randomAccessFile.get().write(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset));
-                      }
-                      downloadFile.downloadedSize += bytes.length - bytesOffset;
-                      longs[1] += bytes.length - bytesOffset;
-                      downloadFile.downloadedParts.put(finalI, longs);
-                      if (downloadCallback != null) {
-                        downloadCallback.onProgress(downloadFile, (getFile.offset + bytesOffset), (int) (bytes.length - bytesOffset),
-                          ByteBuffer.wrap(bytes, (int) bytesOffset, (int) (bytes.length - bytesOffset)).array(), downloadFile.downloadedSize);
-                      }
-                      firstLatch.countDown();
-                      downloadFile.state = DownloadFile.FILE_COMPLETED;
-                      break;
+                      assert outputStream != null;
+                      outputStream.write(bytes, (int) bytesOffset, (int) length);
                     }
 
+                    downloadFile.downloadedSize += length;
+                    longs[1] += length;
+                    downloadFile.downloadedParts.put(finalI, longs);
                     if (downloadManager != null && !stream) {
                       downloadManager.addFile(downloadFile);
                     }
+                    if (downloadCallback != null) {
+                      downloadCallback.onProgress(downloadFile, getFile.offset + bytesOffset, length,
+                        ByteBuffer.wrap(bytes, (int) bytesOffset, (int) length).array(), downloadFile.downloadedSize);
+                    }
                     getFile.offset += getFile.limit;
+                    if (bytes.length < bytesLength) {
+                      break;
+                    }
                   } else if (object instanceof ApiScheme.upload.fileCdnRedirect cdnRedirect) {
                     fileCdnRedirect.set(cdnRedirect);
                     downloadFile.dcId = cdnRedirect.dc_id;
@@ -572,43 +550,50 @@ public class WavegramDownloader {
                     if (reuploadRes instanceof MTProtoScheme.rpc_error error) {
                       downloadFile.state = DownloadFile.FILE_CANCEL;
                       rpcError.set(error);
-                      if (downloadCallback != null) {
-                        downloadCallback.onError(downloadFile, error);
-                      }
                       break;
                     }
                     protoClient.switchDc(downloadFile.dcId);
                   } else if (object instanceof MTProtoScheme.rpc_error error) {
                     downloadFile.state = DownloadFile.FILE_CANCEL;
                     rpcError.set(error);
-                    if (downloadCallback != null) {
-                      downloadCallback.onError(downloadFile, error);
-                    }
+                    break;
+                  } else {
+                    downloadFile.state = DownloadFile.FILE_CANCEL;
+                    rpcError.get().error_message = "UNKNOWN_RESULT";
                     break;
                   }
                   firstLatch.countDown();
                 }
               } catch (ExecutionException e) {
                 if (e.getCause() instanceof RpcException rpcException) {
-                  downloadFile.state = DownloadFile.FILE_CANCEL;
-                  rpcError.set(rpcException.getRpcError());
-                  if (downloadCallback != null) {
-                    downloadCallback.onError(downloadFile, rpcError.get());
+                  if (rpcException.getRpcError().error_message.equals("TIMEOUT")) {
+                    continue;
                   }
-                  break;
+                  if (downloadFile.state != DownloadFile.FILE_CANCEL) {
+                    downloadFile.state = DownloadFile.FILE_CANCEL;
+                    rpcError.set(rpcException.getRpcError());
+                  }
+                } else {
+                  if (downloadFile.state != DownloadFile.FILE_CANCEL) {
+                    downloadFile.state = DownloadFile.FILE_CANCEL;
+                    rpcError.get().error_message = e.getMessage();
+                  }
                 }
+                break;
               } catch (Exception e) {
-                downloadFile.state = DownloadFile.FILE_CANCEL;
-                rpcError.get().error_message = e.getMessage();
-                if (downloadCallback != null) {
-                  downloadCallback.onError(downloadFile, rpcError.get());
+                if (downloadFile.state != DownloadFile.FILE_CANCEL) {
+                  downloadFile.state = DownloadFile.FILE_CANCEL;
+                  rpcError.get().error_message = e.getMessage();
                 }
                 break;
               }
             }
             firstLatch.countDown();
             protoClient.close();
-            protoClients.get(downloadFile.fileId).remove(protoClient);
+            List<MTProtoClient> protoClientList = protoClients.get(downloadFile.fileId);
+            if (protoClientList != null) {
+              protoClientList.remove(protoClient);
+            }
           });
           downloadFutures.add(downloadFuture);
           firstLatch.await();
@@ -619,17 +604,15 @@ public class WavegramDownloader {
         }
         downloadFutures.clear();
         downloadExecutorService.close();
-        if (randomAccessFile.get() != null) {
-          randomAccessFile.get().close();
+        protoClients.remove(downloadFile.fileId);
+        if (fileOutputStream.get() != null && outputStream == null) {
+          fileOutputStream.get().close();
         }
 
         if (downloadFile.downloadedSize == downloadFile.size - downloadFile.offset ||
           downloadFile.state == DownloadFile.FILE_COMPLETED) {
           downloadFile.state = DownloadFile.FILE_COMPLETED;
           logger.info("file: {} completed", downloadFile);
-          if (downloadManager != null && !stream) {
-            downloadManager.addFile(downloadFile);
-          }
           future.complete(downloadFile);
           if (downloadCallback != null) {
             downloadCallback.onComplete(downloadFile);
@@ -642,13 +625,39 @@ public class WavegramDownloader {
           }
         }
 
+        if (downloadManager != null && !stream) {
+          downloadManager.addFile(downloadFile);
+        }
+
         downloadFiles.remove(downloadFile.fileId);
       } catch (Exception e) {
-        e.printStackTrace();
+        logger.error("exception: ", e);
       }
     });
 
     return future.copy();
+  }
+
+  public void pause(long fileId) {
+    DownloadFile downloadFile = downloadFiles.get(fileId);
+    if (downloadFile != null) {
+      downloadFile.state = DownloadFile.FILE_CANCEL;
+      downloadFile.future.cancel(false);
+      if (protoClients.containsKey(fileId)) {
+        protoClients.remove(fileId).forEach(MTProtoClient::close);
+      }
+    }
+  }
+
+  public void resume(long fileId) {
+    DownloadFile downloadFile = downloadFiles.get(fileId);
+    if (downloadFile == null && downloadManager != null) {
+      downloadFile = downloadManager.getFile(fileId);
+    }
+    if (downloadFile != null && downloadFile.state == DownloadFile.FILE_CANCEL && downloadFile.filepath != null) {
+      download(downloadFile.inputFileLocation, downloadFile.dcId, downloadFile.partSize, downloadFile.offset,
+        downloadFile.size, downloadFile.filepath, false);
+    }
   }
 
   public void remove(long fileId) {
@@ -659,30 +668,10 @@ public class WavegramDownloader {
       if (protoClients.containsKey(fileId)) {
         protoClients.remove(fileId).forEach(MTProtoClient::close);
       }
-      if (downloadExecutorServiceMap.containsKey(downloadFile.fileId)) {
-        downloadExecutorServiceMap.remove(downloadFile.fileId).shutdownNow();
-      }
     }
 
     if (downloadManager != null) {
       downloadManager.remove(fileId);
-    }
-  }
-
-  public void pause(long fileId) {
-    DownloadFile downloadFile = downloadFiles.get(fileId);
-    if (downloadFile.fileId == fileId) {
-      downloadFile.state = DownloadFile.FILE_CANCEL;
-      if (downloadManager != null) {
-        downloadManager.addFile(downloadFile);
-      }
-      downloadFile.future.cancel(false);
-      if (protoClients.containsKey(fileId)) {
-        protoClients.remove(fileId).forEach(MTProtoClient::close);
-      }
-      if (downloadExecutorServiceMap.containsKey(downloadFile.fileId)) {
-        downloadExecutorServiceMap.remove(downloadFile.fileId).shutdownNow();
-      }
     }
   }
 
@@ -692,9 +681,6 @@ public class WavegramDownloader {
       downloadFile.future.cancel(false);
       if (protoClients.containsKey(downloadFile.fileId)) {
         protoClients.remove(downloadFile.fileId).forEach(MTProtoClient::close);
-      }
-      if (downloadExecutorServiceMap.containsKey(downloadFile.fileId)) {
-        downloadExecutorServiceMap.remove(downloadFile.fileId).shutdownNow();
       }
     }));
     downloadFiles.clear();

@@ -293,7 +293,7 @@ public class MTProtoClient extends TcpSocket {
 
       executor.execute(this::loop);
     } catch (Exception e) {
-      logger.error("error", e);
+      logger.error("exception: {}", e.getMessage());
       reconnect();
     }
   }
@@ -377,7 +377,7 @@ public class MTProtoClient extends TcpSocket {
         }
       }
     } catch (Exception e) {
-      logger.error("error", e);
+      logger.error("exception: {}", e.getMessage());
       reconnect();
     }
   }
@@ -811,7 +811,7 @@ public class MTProtoClient extends TcpSocket {
 
       removeStoredMsgs();
     } catch (Exception e) {
-      logger.error("error", e);
+      logger.error("exception: {}", e.getMessage());
     }
   }
 
@@ -1477,7 +1477,7 @@ public class MTProtoClient extends TcpSocket {
         }
         protocol.writeMsg(this.outputStream, messageOutputStream.toByteArray());
       } catch (Exception e) {
-        logger.error("error", e);
+        logger.error("exception: {}", e.getMessage());
         sentMessages.remove(info.message.messageId);
         if (!isConnected && !isReconnecting) {
           MTProtoScheme.rpc_error rpcError = new MTProtoScheme.rpc_error();
@@ -1524,7 +1524,9 @@ public class MTProtoClient extends TcpSocket {
   public void close() {
     isConnected = false;
     isInited = false;
-    executor.execute(super::close);
+    if (!executor.isShutdown()) {
+      executor.execute(super::close);
+    }
     if (pingDelayScheduleFuture != null) {
       pingDelayScheduleFuture.cancel(true);
     }
