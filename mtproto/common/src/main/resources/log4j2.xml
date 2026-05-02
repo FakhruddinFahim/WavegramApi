@@ -11,7 +11,7 @@
         <Console name="ConsoleColor" target="SYSTEM_OUT">
             <PatternLayout pattern="%highlight{%d{YYYY-MM-dd HH:mm:ss.SSS} %-5level %logger{40} - %msg%n}"/>
             <Filters>
-                <LevelMatchFilter level="info" onMatch="ACCEPT" onMismatch="DENY"/>
+                <LevelMatchFilter level="info" onMatch="ACCEPT" onMismatch="NEUTRAL"/>
                 <LevelMatchFilter level="error" onMatch="ACCEPT" onMismatch="DENY"/>
             </Filters>
         </Console>
