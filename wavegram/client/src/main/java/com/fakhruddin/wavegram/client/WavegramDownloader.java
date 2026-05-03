@@ -10,11 +10,8 @@ import com.fakhruddin.wavegram.tl.ApiScheme;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
-import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
@@ -649,15 +646,18 @@ public class WavegramDownloader {
     }
   }
 
-  public void resume(long fileId) {
+  public CompletableFuture<DownloadFile> resume(long fileId) {
     DownloadFile downloadFile = downloadFiles.get(fileId);
     if (downloadFile == null && downloadManager != null) {
       downloadFile = downloadManager.getFile(fileId);
     }
     if (downloadFile != null && downloadFile.state == DownloadFile.FILE_CANCEL && downloadFile.filepath != null) {
-      download(downloadFile.inputFileLocation, downloadFile.dcId, downloadFile.partSize, downloadFile.offset,
+      return download(downloadFile.inputFileLocation, downloadFile.dcId, downloadFile.partSize, downloadFile.offset,
         downloadFile.size, downloadFile.filepath, false);
     }
+    CompletableFuture<DownloadFile> future = new CompletableFuture<>();
+    future.completeExceptionally(new RpcException(-1, "NOT_FOUND"));
+    return future;
   }
 
   public void remove(long fileId) {

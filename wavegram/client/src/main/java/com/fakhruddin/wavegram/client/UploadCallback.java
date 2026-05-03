@@ -6,11 +6,11 @@ import com.fakhruddin.mtproto.tl.MTProtoScheme;
  * Created by Fakhruddin Fahim on 30/08/2022
  */
 public interface UploadCallback {
-  void onStart(long fileId, WavegramUploader.UploadFile uploadFile);
+  void onStart(WavegramUploader.UploadFile uploadFile);
 
-  void onProgress(long fileId, long offset, long uploadedBytes, WavegramUploader.UploadFile uploadFile);
+  void onProgress(WavegramUploader.UploadFile uploadFile, long offset, long uploadedBytes);
 
-  void onComplete(long fileId, WavegramUploader.UploadFile uploadFile);
+  void onComplete(WavegramUploader.UploadFile uploadFile);
 
-  void onError(long fileId, MTProtoScheme.rpc_error rpcError2);
+  void onError(WavegramUploader.UploadFile uploadFile, MTProtoScheme.rpc_error rpcError);
 }

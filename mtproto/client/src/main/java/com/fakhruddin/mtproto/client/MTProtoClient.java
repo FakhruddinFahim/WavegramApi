@@ -39,7 +39,7 @@ public class MTProtoClient extends TcpSocket {
   private static final int AUTH_RETRY_LIMIT = 5;
   protected ExecutorService executor;
   private ExecutorService writeExecutor;
-  private ScheduledExecutorService scheduledExecutor;
+  protected ScheduledExecutorService scheduledExecutor;
 
   private ScheduledFuture<?> updateSaltFuture;
   private ScheduledFuture<?> pingDelayScheduleFuture;

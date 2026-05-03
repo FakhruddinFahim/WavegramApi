@@ -1,29 +1,32 @@
 package com.fakhruddin.wavegram.client;
 
-import com.fakhruddin.mtproto.AuthKey;
-import com.fakhruddin.mtproto.MTSession;
+import com.fakhruddin.mtproto.Pair;
 import com.fakhruddin.mtproto.client.*;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
-import com.fakhruddin.mtproto.tl.TLInputStream;
+import com.fakhruddin.mtproto.tl.TLMethod;
 import com.fakhruddin.mtproto.tl.TLObject;
 import com.fakhruddin.wavegram.Config;
 import com.fakhruddin.wavegram.tl.ApiScheme;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-import java.io.File;
-import java.io.InputStream;
-import java.io.RandomAccessFile;
+import java.io.*;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Created by Fakhruddin Fahim on 30/08/2022
  */
 public class WavegramUploader {
   private static final String TAG = "WavegramUploader";
+  private static final Logger logger = LogManager.getLogger(WavegramUploader.class);
   private final WavegramClient wavegramClient;
   public static final int MIN_CHUNK_SIZE = 1024;
   public static final int MAX_CHUNK_SIZE = 1024 * 512;
@@ -32,83 +35,9 @@ public class WavegramUploader {
   int parallelUploadLimit = 2;
   int threadPerUpload = 2;
   private UploadCallback uploadCallback;
-  private final List<UploadFile> uploadFiles = new ArrayList<>();
+  private final Map<Long, UploadFile> uploadFiles = new LinkedHashMap<>();
   private final Map<Long, List<MTProtoClient>> protoClients = new HashMap<>();
-  private final Map<Long, Future<?>> futures = new HashMap<>();
-  private final Map<Long, ExecutorService> uploadExecutorServiceMap = new HashMap<>();
   private UploadManager uploadManager;
-
-  private static class UploadClientManager extends ClientManager {
-    private int dcId = 0;
-
-    private ClientManager clientManager;
-
-    public UploadClientManager(ClientManager clientManager) {
-      this.clientManager = clientManager;
-    }
-
-    @Override
-    public void setDcId(int dcId) {
-      this.dcId = dcId;
-    }
-
-    @Override
-    public int getDcId() {
-      return this.dcId;
-    }
-
-    @Override
-    public AuthKey getAuthKey(int dcId, AuthKey.Type type) {
-      if (clientManager != null) {
-        return clientManager.getAuthKey(dcId, type);
-      }
-      return null;
-    }
-
-    @Override
-    public void setAuthKey(int dcId, AuthKey authKey) {
-      if (clientManager != null) {
-        clientManager.setAuthKey(dcId, authKey);
-      }
-    }
-
-    @Override
-    public void deleteAuthKey(int dcId, AuthKey.Type type) {
-      if (clientManager != null) {
-        clientManager.deleteAuthKey(dcId, type);
-      }
-    }
-
-    @Override
-    public void setSession(int dcId, MTSession session) {
-
-    }
-
-    @Override
-    public MTSession getSession(int dcId) {
-      return null;
-    }
-
-    @Override
-    public void deleteSession(int dcId) {
-
-    }
-
-    @Override
-    public List<MTProtoScheme.future_salt> getSalts(int dcId) {
-      if (clientManager != null) {
-        return clientManager.getSalts(dcId);
-      }
-      return new ArrayList<>();
-    }
-
-    @Override
-    public void setSalts(int dcId, List<MTProtoScheme.future_salt> futureSalts) {
-      if (clientManager != null) {
-        clientManager.setSalts(dcId, futureSalts);
-      }
-    }
-  }
 
   public static class UploadFile {
     public static final int FILE_QUEUE = 0;
@@ -117,27 +46,28 @@ public class WavegramUploader {
     public static final int FILE_CANCEL = 3;
     public long fileId = 0;
     public long state = FILE_QUEUE;
+    public long offset = 0;
     public long size = 0;
     public long partSize = MAX_CHUNK_SIZE;
-    public List<Integer> uploadedFileParts = new ArrayList<>();
+    public Map<Integer, Pair<Long, Long>> uploadedParts = new HashMap<>();
     public int fileTotalParts = 0;
-    public String file;
+    public String filepath;
     public long bytesUploaded = 0;
 
-    public String filename;
+    private Future<?> future = null;
 
     @Override
     public String toString() {
       return "UploadFile{" +
         "fileId=" + fileId +
         ", state=" + state +
+        ", offset=" + offset +
         ", size=" + size +
         ", partSize=" + partSize +
-        ", uploadedFileParts=" + uploadedFileParts +
+        ", uploadedFileParts=" + uploadedParts +
         ", fileTotalParts=" + fileTotalParts +
-        ", file='" + file + '\'' +
+        ", filepath='" + filepath + '\'' +
         ", bytesUploaded=" + bytesUploaded +
-        ", filename='" + filename + '\'' +
         '}';
     }
   }
@@ -170,444 +100,391 @@ public class WavegramUploader {
     this.uploadCallback = uploadCallback;
   }
 
-  public void upload(long fileId, InputStream inputStream, String filename, long size) {
-    if (executorService == null || executorService.isTerminated()) {
-      executorService = Executors.newFixedThreadPool(parallelUploadLimit);
-    }
-    UploadFile uploadFile = new UploadFile();
-    uploadFile.fileId = fileId;
-    uploadFile.size = size;
-    uploadFile.filename = filename;
-    uploadFile.fileTotalParts = (int) Math.ceil((double) uploadFile.size / MAX_CHUNK_SIZE);
-    if (uploadFile.fileTotalParts > 3000) {
-      if (uploadCallback != null) {
-        MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-        rpcError2.error_code = -1;
-        rpcError2.error_message = "FILE_PARTS_INVALID";
-        uploadCallback.onError(fileId, rpcError2);
-      }
-      return;
-    }
-
-    if (uploadManager != null) {
-      UploadFile file2 = uploadManager.getFile(uploadFile.fileId);
-      if (file2 != null) {
-        uploadFile.uploadedFileParts = file2.uploadedFileParts;
-      }
-      if (uploadFile.uploadedFileParts.size() == 0) {
-        uploadManager.addFile(uploadFile);
-      }
-    }
-    uploadFiles.add(uploadFile);
-
-    Future<?> submit = executorService.submit(() -> {
-      try {
-        uploadFile.state = UploadFile.FILE_UPLOADING;
-        if (uploadCallback != null) {
-          uploadCallback.onStart(fileId, uploadFile);
-        }
-        int threadCount = 1;
-        ExecutorService uploadExecutorService = Executors.newFixedThreadPool(threadCount);
-        List<Future<?>> uploadFutures = new ArrayList<>();
-        uploadExecutorServiceMap.put(uploadFile.fileId, uploadExecutorService);
-        for (int i = 0; i < threadCount; i++) {
-          MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
-          protoClient.setClientManager(new UploadClientManager(wavegramClient.getClientManager()));
-          protoClient.setRsaPublicKeys(Config.RSA_PUBLIC_KEYS);
-          protoClient.dcId = wavegramClient.dcId;
-          protoClient.start();
-          List<MTProtoClient> list = new ArrayList<>();
-          list.add(protoClient);
-          protoClients.put(uploadFile.fileId, list);
-
-          ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
-          initConnection.api_id = wavegramClient.apiId;
-          initConnection.device_model = wavegramClient.deviceModel;
-          initConnection.system_version = wavegramClient.systemVersion;
-          initConnection.app_version = wavegramClient.appVersion;
-          initConnection.system_lang_code = wavegramClient.langCode;
-          initConnection.lang_pack = "";
-          initConnection.lang_code = wavegramClient.langCode;
-          initConnection.proxy = null;
-          initConnection.params = null;
-          initConnection.query = new ApiScheme.help.getNearestDc();
-          ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
-          invokeWithLayer.layer = ApiScheme.LAYER_NUM;
-          invokeWithLayer.query = initConnection;
-
-          protoClient.executeRpc(invokeWithLayer, RpcOptions.build().initRequired(false)).get();
-
-          int finalI = i;
-          int finalThreadCount = threadCount;
-          Future<?> uploadFuture = uploadExecutorService.submit(() -> {
-            try {
-              long endLength = uploadFile.size / finalThreadCount;
-              endLength -= endLength % uploadFile.partSize;
-              long offset = endLength * finalI;
-              endLength += endLength * finalI;
-              long currentEndLength = endLength;
-              if (finalI == finalThreadCount - 1) {
-                currentEndLength = uploadFile.size;
-              }
-
-
-              int filePart = offset == 0 ? 0 : (int) (offset / uploadFile.partSize);
-
-              int i1 = uploadFile.uploadedFileParts.indexOf(filePart + 1);
-              if (i1 != -1) {
-                for (int j = i1; j < uploadFile.uploadedFileParts.size(); j++) {
-                  Integer integer = uploadFile.uploadedFileParts.get(j);
-                  if (filePart + 1 == integer) {
-                    filePart = integer;
-                    offset = uploadFile.partSize * filePart;
-                  } else {
-                    break;
-                  }
-                }
-              }
-
-              synchronized (uploadFile) {
-                uploadFile.bytesUploaded += offset;
-              }
-
-              while (offset < currentEndLength && uploadFile.state == UploadFile.FILE_UPLOADING) {
-                byte[] buffer = new byte[(int) uploadFile.partSize];
-                int bytesRead = 0;
-                int read = 0;
-                while ((bytesRead = inputStream.read(buffer, read, (int) (uploadFile.partSize - read))) != -1) {
-                  read += bytesRead;
-                  if (uploadFile.partSize == read) {
-                    break;
-                  }
-                }
-                TLObject object;
-                if (uploadFile.size > MIN_LARGE_FILE_SIZE) {
-                  ApiScheme.upload.saveBigFilePart saveBigFilePart = new ApiScheme.upload.saveBigFilePart();
-                  saveBigFilePart.file_id = uploadFile.fileId;
-                  saveBigFilePart.bytes = new TLInputStream(buffer).readBytes(read);
-                  saveBigFilePart.file_part = filePart;
-                  saveBigFilePart.file_total_parts = uploadFile.fileTotalParts;
-                  object = saveBigFilePart;
-                } else {
-                  ApiScheme.upload.saveFilePart saveFilePart = new ApiScheme.upload.saveFilePart();
-                  saveFilePart.file_id = uploadFile.fileId;
-                  saveFilePart.bytes = new TLInputStream(buffer).readBytes(read);
-                  saveFilePart.file_part = filePart;
-                  object = saveFilePart;
-                }
-                Future<TLObject> future = protoClient.executeRpc(object);
-                TLObject object1 = future.get();
-                if (object1 instanceof ApiScheme.boolTrue) {
-                  synchronized (uploadFile) {
-                    offset += read;
-                    filePart++;
-                    uploadFile.bytesUploaded += read;
-                    uploadFile.uploadedFileParts.add(filePart);
-                    if (uploadCallback != null) {
-                      uploadCallback.onProgress(fileId, offset - read, read, uploadFile);
-                    }
-                    if (uploadManager != null) {
-                      uploadManager.addFile(uploadFile);
-                    }
-                  }
-                }
-              }
-              protoClient.close();
-              protoClients.get(uploadFile.fileId).remove(protoClient);
-
-            } catch (Exception e) {
-              e.printStackTrace();
-            }
-          });
-          uploadFutures.add(uploadFuture);
-
-        }
-
-        for (Future<?> future : uploadFutures) {
-          future.get();
-        }
-        uploadFutures.clear();
-        uploadExecutorService.shutdownNow();
-        futures.remove(uploadFile.fileId);
-
-        if (uploadFile.uploadedFileParts.size() == uploadFile.fileTotalParts) {
-          uploadFiles.removeIf(uf -> uf.fileId == uploadFile.fileId);
-          uploadFile.state = UploadFile.FILE_UPLOADED;
-          if (uploadManager != null) {
-            uploadManager.addFile(uploadFile);
-          }
-          if (uploadCallback != null) {
-            uploadCallback.onComplete(uploadFile.fileId, uploadFile);
-          }
-        } else {
-          MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-          rpcError2.error_code = -1;
-          rpcError2.error_message = "FILE_PART_INVALID";
-          if (uploadCallback != null) {
-            uploadCallback.onError(uploadFile.fileId, rpcError2);
-          }
-        }
-
-      } catch (InterruptedException e) {
-        e.printStackTrace();
-      } catch (ExecutionException e) {
-        e.printStackTrace();
-      }
-    });
-    futures.put(uploadFile.fileId, submit);
+  public CompletableFuture<UploadFile> upload(long fileId, String filepath) {
+    return upload(fileId, filepath, MAX_CHUNK_SIZE, 0, -1);
   }
 
-
-  public void upload(long fileId, String file) {
-    if (executorService == null || executorService.isTerminated()) {
-      executorService = Executors.newFixedThreadPool(parallelUploadLimit);
-    }
+  public CompletableFuture<UploadFile> upload(long fileId, String filepath, int partSize, long offset, long size) {
     UploadFile uploadFile = new UploadFile();
     uploadFile.fileId = fileId;
-    uploadFile.file = file;
-    File file1 = new File(file);
-    uploadFile.filename = file1.getName();
-    uploadFile.size = file1.length();
-    uploadFile.fileTotalParts = (int) Math.ceil((double) uploadFile.size / MAX_CHUNK_SIZE);
-    if (uploadFile.fileTotalParts > 3000) {
-      if (uploadCallback != null) {
-        MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-        rpcError2.error_code = -1;
-        rpcError2.error_message = "FILE_PARTS_INVALID";
-        uploadCallback.onError(fileId, rpcError2);
+    uploadFile.filepath = filepath;
+    uploadFile.partSize = partSize;
+    uploadFile.offset = offset;
+    uploadFile.size = size;
+    return upload(uploadFile, null);
+  }
+
+  public CompletableFuture<UploadFile> upload(long fileId, InputStream inputStream) {
+    return upload(fileId, inputStream, MAX_CHUNK_SIZE, -1);
+  }
+
+  public CompletableFuture<UploadFile> upload(long fileId, InputStream inputStream, int partSize, long size) {
+    UploadFile uploadFile = new UploadFile();
+    uploadFile.fileId = fileId;
+    uploadFile.partSize = partSize;
+    uploadFile.size = size;
+    return upload(uploadFile, inputStream);
+  }
+
+  private CompletableFuture<UploadFile> upload(UploadFile uploadFile, InputStream inputStream) {
+    if (executorService == null || executorService.isShutdown()) {
+      executorService = Executors.newFixedThreadPool(parallelUploadLimit);
+    }
+
+    CompletableFuture<WavegramUploader.UploadFile> future = new CompletableFuture<>();
+
+    if (uploadFile.size <= 0 && uploadFile.filepath != null) {
+      try {
+        uploadFile.size = Files.size(Path.of(uploadFile.filepath));
+      } catch (IOException ignored) {
       }
-      return;
+    }
+    if (uploadFile.size > 0) {
+      uploadFile.fileTotalParts = (int) Math.ceil((double) (uploadFile.size - uploadFile.offset) / MAX_CHUNK_SIZE);
+    } else {
+      uploadFile.fileTotalParts = -1;
     }
 
     if (uploadManager != null) {
-      UploadFile file2 = uploadManager.getFile(uploadFile.fileId);
-      if (file2 != null) {
-        uploadFile.uploadedFileParts = file2.uploadedFileParts;
+      UploadFile tempFile = uploadManager.getFile(uploadFile.fileId);
+      if (tempFile != null) {
+        uploadFile.uploadedParts = tempFile.uploadedParts;
       }
-      if (uploadFile.uploadedFileParts.size() == 0) {
+      if (uploadFile.uploadedParts.isEmpty()) {
         uploadManager.addFile(uploadFile);
       }
     }
-    uploadFiles.add(uploadFile);
-    Future<?> submit = executorService.submit(() -> {
+
+    uploadFiles.put(uploadFile.fileId, uploadFile);
+
+    uploadFile.future = executorService.submit(() -> {
       try {
         uploadFile.state = UploadFile.FILE_UPLOADING;
         if (uploadCallback != null) {
-          uploadCallback.onStart(fileId, uploadFile);
+          uploadCallback.onStart(uploadFile);
         }
+
         int threadCount = 1;
-        if (uploadFile.size > MIN_LARGE_FILE_SIZE) {
+        if (uploadFile.size - uploadFile.offset > MIN_LARGE_FILE_SIZE || uploadFile.size <= 0) {
           threadCount = threadPerUpload;
         }
+
+        AtomicLong streamOffset = new AtomicLong(0);
+
+        AtomicReference<FileInputStream> fileInputStream = new AtomicReference<>();
+        if (inputStream instanceof FileInputStream fi) {
+          fileInputStream.set(fi);
+          streamOffset.set(fi.getChannel().position());
+        } else if (inputStream == null) {
+          fileInputStream.set(new FileInputStream(uploadFile.filepath));
+        } else {
+          threadCount = 1;
+        }
+
+        AtomicReference<MTProtoScheme.rpc_error> rpcError = new AtomicReference<>(new MTProtoScheme.rpc_error());
+        rpcError.get().error_code = -1;
+        rpcError.get().error_message = "";
+
+        AtomicInteger streamFilePart = new AtomicInteger(0);
+
         ExecutorService uploadExecutorService = Executors.newFixedThreadPool(threadCount);
         List<Future<?>> uploadFutures = new ArrayList<>();
-        uploadExecutorServiceMap.put(uploadFile.fileId, uploadExecutorService);
         for (int i = 0; i < threadCount; i++) {
           MTProtoClient protoClient = new MTProtoClient(wavegramClient.getDcOptions());
-          protoClient.setClientManager(new UploadClientManager(wavegramClient.getClientManager()));
-          protoClient.setRsaPublicKeys(Config.RSA_PUBLIC_KEYS);
+          protoClient.context = wavegramClient.context;
           protoClient.dcId = wavegramClient.dcId;
-          protoClient.start();
+          protoClient.sentMsgCacheLimit = 5;
+          protoClient.recvMsgCacheLimit = 5;
+          protoClient.reconnectLimit = 5;
+          protoClient.tempSession = true;
+          protoClient.setClientManager(wavegramClient.getClientManager());
+          protoClient.setRsaPublicKeys(Config.RSA_PUBLIC_KEYS);
           List<MTProtoClient> list = new ArrayList<>();
           list.add(protoClient);
           protoClients.put(uploadFile.fileId, list);
 
-          ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
-          initConnection.api_id = wavegramClient.apiId;
-          initConnection.device_model = wavegramClient.deviceModel;
-          initConnection.system_version = wavegramClient.systemVersion;
-          initConnection.app_version = wavegramClient.appVersion;
-          initConnection.system_lang_code = wavegramClient.langCode;
-          initConnection.lang_pack = "";
-          initConnection.lang_code = wavegramClient.langCode;
-          initConnection.proxy = null;
-          initConnection.params = null;
-          initConnection.query = new ApiScheme.help.getNearestDc();
-          ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
-          invokeWithLayer.layer = ApiScheme.LAYER_NUM;
-          invokeWithLayer.query = initConnection;
-
-          protoClient.executeRpc(invokeWithLayer, RpcOptions.build().initRequired(false)).get();
+          protoClient.start().get();
 
           int finalI = i;
           int finalThreadCount = threadCount;
           Future<?> uploadFuture = uploadExecutorService.submit(() -> {
-            try {
-              long endLength = uploadFile.size / finalThreadCount;
-              endLength -= endLength % uploadFile.partSize;
-              long offset = endLength * finalI;
-              endLength += endLength * finalI;
-              long currentEndLength = endLength;
-              if (finalI == finalThreadCount - 1) {
-                currentEndLength = uploadFile.size;
-              }
-              RandomAccessFile randomAccessFile = new RandomAccessFile(file, "r");
+            ApiScheme.initConnection initConnection = new ApiScheme.initConnection();
+            initConnection.api_id = wavegramClient.apiId;
+            initConnection.device_model = wavegramClient.deviceModel;
+            initConnection.system_version = wavegramClient.systemVersion;
+            initConnection.app_version = wavegramClient.appVersion;
+            initConnection.system_lang_code = wavegramClient.langCode;
+            initConnection.lang_pack = "";
+            initConnection.lang_code = wavegramClient.langCode;
+            initConnection.proxy = null;
+            initConnection.params = null;
 
-              int filePart = offset == 0 ? 0 : (int) (offset / uploadFile.partSize);
+            ApiScheme.invokeWithLayer invokeWithLayer = new ApiScheme.invokeWithLayer();
+            invokeWithLayer.layer = ApiScheme.LAYER_NUM;
+            invokeWithLayer.query = initConnection;
 
-              int i1 = uploadFile.uploadedFileParts.indexOf(filePart + 1);
-              if (i1 != -1) {
-                for (int j = i1; j < uploadFile.uploadedFileParts.size(); j++) {
-                  Integer integer = uploadFile.uploadedFileParts.get(j);
-                  if (filePart + 1 == integer) {
-                    filePart = integer;
-                    offset = uploadFile.partSize * filePart;
+            long offset = uploadFile.offset + streamOffset.get();
+            long lengthPerThread = (uploadFile.size - uploadFile.offset) / finalThreadCount;
+            lengthPerThread -= lengthPerThread % uploadFile.partSize;
+            offset += lengthPerThread * finalI;
+            long endOffset = uploadFile.offset + lengthPerThread * (finalI + 1);
+            if (finalI == finalThreadCount - 1) {
+              endOffset = uploadFile.size;
+            }
+
+            Pair<Long, Long> pair = uploadFile.uploadedParts.get(finalI);
+            if (pair != null) {
+              offset += pair.second;
+            } else {
+              uploadFile.uploadedParts.put(finalI, new Pair<>(offset, 0L));
+            }
+
+            int filePart = offset == 0 ? 0 : (int) (offset / uploadFile.partSize);
+
+            while ((endOffset <= 0 || offset < endOffset) && uploadFile.state == UploadFile.FILE_UPLOADING) {
+              try {
+                long bufferLen = uploadFile.partSize;
+                if (uploadFile.size > 0 && uploadFile.size - uploadFile.offset < (filePart + 1) * uploadFile.partSize) {
+                  bufferLen = (uploadFile.size - uploadFile.offset) - filePart * uploadFile.partSize;
+                }
+                byte[] buffer = new byte[(int) bufferLen];
+                int readCount = 0;
+                if (fileInputStream.get() != null) {
+                  FileChannel channel = fileInputStream.get().getChannel();
+                  ByteBuffer byteBuffer = ByteBuffer.wrap(buffer);
+                  if (uploadFile.size <= 0) {
+                    synchronized (fileInputStream) {
+                      while (byteBuffer.hasRemaining()) {
+                        int n = channel.read(byteBuffer);
+                        if (n == -1) {
+                          break;
+                        }
+                        readCount += n;
+                      }
+                    }
                   } else {
-                    break;
+                    while (byteBuffer.hasRemaining()) {
+                      int n = channel.read(byteBuffer, offset + readCount);
+                      if (n == -1) {
+                        break;
+                      }
+                      readCount += n;
+                    }
+                  }
+                } else {
+                  int n;
+                  assert inputStream != null;
+                  if (uploadFile.size <= 0) {
+                    synchronized (inputStream) {
+                      while ((n = inputStream.read(buffer, readCount, (int) (uploadFile.partSize - readCount))) != -1) {
+                        readCount += n;
+                        if (uploadFile.partSize == readCount) {
+                          break;
+                        }
+                      }
+                    }
+                  } else {
+                    while ((n = inputStream.read(buffer, readCount, (int) (uploadFile.partSize - readCount))) != -1) {
+                      readCount += n;
+                      if (uploadFile.partSize == readCount) {
+                        break;
+                      }
+                    }
                   }
                 }
-              }
 
-              synchronized (uploadFile) {
-                uploadFile.bytesUploaded += offset;
-              }
-
-              while (offset < currentEndLength && uploadFile.state == UploadFile.FILE_UPLOADING) {
-                byte[] buffer = new byte[(int) uploadFile.partSize];
-                int bytesRead = 0;
-                int read = 0;
-                randomAccessFile.seek(offset);
-                while ((bytesRead = randomAccessFile.read(buffer, read, (int) (uploadFile.partSize - read))) != -1) {
-                  read += bytesRead;
-                  if (uploadFile.partSize == read) {
-                    break;
-                  }
-                }
-                TLObject object;
-                if (uploadFile.size > MIN_LARGE_FILE_SIZE) {
+                TLMethod<?> method;
+                if (uploadFile.size - uploadFile.offset > MIN_LARGE_FILE_SIZE || uploadFile.size <= 0) {
                   ApiScheme.upload.saveBigFilePart saveBigFilePart = new ApiScheme.upload.saveBigFilePart();
                   saveBigFilePart.file_id = uploadFile.fileId;
-                  saveBigFilePart.bytes = ByteBuffer.wrap(buffer, 0, read).array();
-                  saveBigFilePart.file_part = filePart;
+                  if (buffer.length > readCount) {
+                    saveBigFilePart.bytes = Arrays.copyOf(buffer, readCount);
+                  } else {
+                    saveBigFilePart.bytes = buffer;
+                  }
+                  if (uploadFile.size <= 0) { // streaming
+                    saveBigFilePart.file_part = streamFilePart.getAndIncrement();
+                    if (uploadFile.partSize > readCount) { // last part of stream
+                      if (saveBigFilePart.bytes.length == 0) {
+                        saveBigFilePart.file_part = streamFilePart.decrementAndGet();
+                      }
+                      uploadFile.fileTotalParts = streamFilePart.get();
+                    }
+                  } else {
+                    saveBigFilePart.file_part = filePart;
+                  }
                   saveBigFilePart.file_total_parts = uploadFile.fileTotalParts;
-                  object = saveBigFilePart;
+                  method = saveBigFilePart;
                 } else {
                   ApiScheme.upload.saveFilePart saveFilePart = new ApiScheme.upload.saveFilePart();
                   saveFilePart.file_id = uploadFile.fileId;
-                  saveFilePart.bytes = ByteBuffer.wrap(buffer, 0, read).array();
+                  if (buffer.length > readCount) {
+                    saveFilePart.bytes = Arrays.copyOf(buffer, readCount);
+                  } else {
+                    saveFilePart.bytes = buffer;
+                  }
                   saveFilePart.file_part = filePart;
-                  object = saveFilePart;
+                  method = saveFilePart;
                 }
-                Future<TLObject> future = protoClient.executeRpc(object);
-                TLObject object1 = future.get();
-                if (object1 instanceof ApiScheme.boolTrue) {
+
+                initConnection.query = method;
+                if (invokeWithLayer != null) {
+                  invokeWithLayer.query = initConnection;
+                }
+                TLObject result = protoClient.executeRpc(invokeWithLayer != null ? invokeWithLayer : method,
+                  RpcOptions.build().initRequired(invokeWithLayer == null)).get();
+                invokeWithLayer = null;
+
+                if (result instanceof ApiScheme.boolTrue) {
                   synchronized (uploadFile) {
-                    offset += read;
+                    offset += readCount;
                     filePart++;
-                    uploadFile.bytesUploaded += read;
-                    uploadFile.uploadedFileParts.add(filePart);
-                    if (uploadCallback != null) {
-                      uploadCallback.onProgress(fileId, offset - read, read, uploadFile);
+                    uploadFile.bytesUploaded += readCount;
+                    Pair<Long, Long> part = uploadFile.uploadedParts.get(finalI);
+                    if (part != null) {
+                      part.second += readCount;
                     }
                     if (uploadManager != null) {
                       uploadManager.addFile(uploadFile);
                     }
+                    if (uploadCallback != null) {
+                      uploadCallback.onProgress(uploadFile, offset - readCount, readCount);
+                    }
+                    if (uploadFile.size <= 0 && uploadFile.fileTotalParts == streamFilePart.get()) {
+                      break;
+                    }
+                  }
+                } else if (result instanceof MTProtoScheme.rpc_error error) {
+                  uploadFile.state = UploadFile.FILE_CANCEL;
+                  rpcError.set(error);
+                  break;
+                } else {
+                  uploadFile.state = UploadFile.FILE_CANCEL;
+                  rpcError.get().error_message = "UNKNOWN_RESULT";
+                  break;
+                }
+              } catch (ExecutionException e) {
+                if (e.getCause() instanceof RpcException rpcException) {
+                  if (rpcException.getRpcError().error_message.equals("TIMEOUT")) {
+                    continue;
+                  }
+                  if (uploadFile.state != UploadFile.FILE_CANCEL) {
+                    uploadFile.state = UploadFile.FILE_CANCEL;
+                    rpcError.set(rpcException.getRpcError());
+                  }
+                } else {
+                  if (uploadFile.state != UploadFile.FILE_CANCEL) {
+                    uploadFile.state = UploadFile.FILE_CANCEL;
+                    rpcError.get().error_message = e.getMessage();
                   }
                 }
+                break;
+              } catch (Exception e) {
+                if (uploadFile.state != UploadFile.FILE_CANCEL) {
+                  uploadFile.state = UploadFile.FILE_CANCEL;
+                  rpcError.get().error_message = e.getMessage();
+                }
+                break;
               }
-              randomAccessFile.close();
-              protoClient.close();
-              protoClients.get(uploadFile.fileId).remove(protoClient);
-            } catch (Exception e) {
-              e.printStackTrace();
+            }
+            protoClient.close();
+            List<MTProtoClient> protoClientList = protoClients.get(uploadFile.fileId);
+            if (protoClientList != null) {
+              protoClientList.remove(protoClient);
             }
           });
           uploadFutures.add(uploadFuture);
         }
 
-        for (Future<?> future : uploadFutures) {
-          future.get();
+        for (Future<?> item : uploadFutures) {
+          item.get();
         }
         uploadFutures.clear();
-        uploadExecutorService.shutdownNow();
-        futures.remove(uploadFile.fileId);
+        uploadExecutorService.close();
 
-        if (uploadFile.uploadedFileParts.size() == uploadFile.fileTotalParts) {
-          uploadFiles.removeIf(uf -> uf.fileId == uploadFile.fileId);
-          uploadFile.state = UploadFile.FILE_UPLOADED;
-          if (uploadManager != null) {
-            uploadManager.addFile(uploadFile);
+        if (fileInputStream.get() != null && inputStream == null) {
+          try {
+            fileInputStream.get().close();
+          } catch (IOException ignored) {
           }
+        }
+
+        if (uploadFile.bytesUploaded == uploadFile.size - uploadFile.offset ||
+          (uploadFile.size <= 0 && uploadFile.fileTotalParts == streamFilePart.get())) {
+          uploadFile.state = UploadFile.FILE_UPLOADED;
+          logger.info("file: {} completed", uploadFile);
+          future.complete(uploadFile);
           if (uploadCallback != null) {
-            uploadCallback.onComplete(uploadFile.fileId, uploadFile);
+            uploadCallback.onComplete(uploadFile);
           }
         } else {
-          MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-          rpcError2.error_code = -1;
-          rpcError2.error_message = "FILE_PART_INVALID";
+          logger.error("file: {}, error: {}", uploadFile, rpcError);
+          future.completeExceptionally(new RpcException(rpcError.get()));
           if (uploadCallback != null) {
-            uploadCallback.onError(uploadFile.fileId, rpcError2);
+            uploadCallback.onError(uploadFile, rpcError.get());
           }
         }
 
-      } catch (InterruptedException e) {
-        e.printStackTrace();
-      } catch (ExecutionException e) {
-        e.printStackTrace();
+        if (uploadManager != null) {
+          uploadManager.addFile(uploadFile);
+        }
+
+        uploadFiles.remove(uploadFile.fileId);
+      } catch (Exception e) {
+        logger.error("exception: ", e);
       }
     });
-    futures.put(uploadFile.fileId, submit);
+
+    return future.copy();
   }
 
+  public void pause(long fileId) {
+    UploadFile uploadFile = uploadFiles.get(fileId);
+    if (uploadFile != null) {
+      uploadFile.state = UploadFile.FILE_CANCEL;
+      uploadFile.future.cancel(false);
+      if (protoClients.containsKey(fileId)) {
+        protoClients.remove(fileId).forEach(MTProtoClient::close);
+      }
+    }
+  }
+
+  public CompletableFuture<UploadFile> resume(long fileId) {
+    UploadFile uploadFile = uploadFiles.get(fileId);
+    if (uploadFile == null && uploadManager != null) {
+      uploadFile = uploadManager.getFile(fileId);
+    }
+    if (uploadFile != null && uploadFile.state == UploadFile.FILE_CANCEL && uploadFile.filepath != null) {
+      return upload(uploadFile, null);
+    }
+    CompletableFuture<UploadFile> future = new CompletableFuture<>();
+    future.completeExceptionally(new RpcException(-1, "NOT_FOUND"));
+    return future;
+  }
 
   public void remove(long fileId) {
-    uploadFiles.removeIf((uploadFile) -> {
-      if (uploadFile.fileId == fileId) {
-        uploadFile.state = UploadFile.FILE_CANCEL;
-        if (futures.containsKey(uploadFile.fileId)) {
-          futures.get(uploadFile.fileId).cancel(true);
-        }
-        if (protoClients.containsKey(fileId)) {
-          protoClients.remove(fileId).forEach(MTProtoClient::close);
-        }
-        if (uploadExecutorServiceMap.containsKey(uploadFile.fileId)) {
-          uploadExecutorServiceMap.remove(uploadFile.fileId).shutdownNow();
-        }
-        return true;
+    UploadFile uploadFile = uploadFiles.get(fileId);
+    if (uploadFile != null) {
+      uploadFile.state = UploadFile.FILE_CANCEL;
+      uploadFile.future.cancel(false);
+      if (protoClients.containsKey(fileId)) {
+        protoClients.remove(fileId).forEach(MTProtoClient::close);
       }
-      return false;
-    });
+    }
     if (uploadManager != null) {
       uploadManager.remove(fileId);
     }
   }
 
-  public void pause(long fileId) {
-    uploadFiles.removeIf((uploadFile) -> {
-      if (uploadFile.fileId == fileId) {
-        uploadFile.state = UploadFile.FILE_CANCEL;
-        if (uploadManager != null) {
-          uploadManager.addFile(uploadFile);
-        }
-        if (futures.containsKey(uploadFile.fileId)) {
-          futures.remove(uploadFile.fileId).cancel(true);
-        }
-        if (protoClients.containsKey(fileId)) {
-          protoClients.remove(fileId).forEach(MTProtoClient::close);
-        }
-        if (uploadExecutorServiceMap.containsKey(uploadFile.fileId)) {
-          uploadExecutorServiceMap.remove(uploadFile.fileId).shutdownNow();
-        }
-        return true;
-      }
-      return false;
-    });
-  }
-
 
   public void close() {
-    for (UploadFile uploadFile : uploadFiles) {
+    uploadFiles.forEach((Long fileId, UploadFile uploadFile) -> {
       uploadFile.state = UploadFile.FILE_CANCEL;
-      if (futures.containsKey(uploadFile.fileId)) {
-        futures.remove(uploadFile.fileId).cancel(true);
-      }
+      uploadFile.future.cancel(false);
       if (protoClients.containsKey(uploadFile.fileId)) {
         protoClients.remove(uploadFile.fileId).forEach(MTProtoClient::close);
       }
-      if (uploadExecutorServiceMap.containsKey(uploadFile.fileId)) {
-        uploadExecutorServiceMap.remove(uploadFile.fileId).shutdownNow();
-      }
-    }
+    });
     uploadFiles.clear();
     if (executorService != null) {
       executorService.shutdownNow();

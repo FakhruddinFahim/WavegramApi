@@ -35,7 +35,6 @@ public class WavegramClient extends MTProtoClient {
   public String deviceModel;
   public String systemVersion;
   public String appVersion;
-  private ScheduledExecutorService scheduledExecutorService;
   private ApiScheme.config config;
   private WavegramManager wavegramManager;
   public static final int UPDATE_DELAY_MIN = 30;
@@ -130,7 +129,7 @@ public class WavegramClient extends MTProtoClient {
           updateScheduledFuture.cancel(true);
         }
         if (wavegramManager != null && wavegramManager.getUserId() != -1) {
-          updateScheduledFuture = scheduledExecutorService.scheduleAtFixedRate(() -> {
+          updateScheduledFuture = scheduledExecutor.scheduleAtFixedRate(() -> {
             executeRpc(new ApiScheme.updates.getState());
           }, 0, UPDATE_DELAY_MIN, TimeUnit.MINUTES);
         }
@@ -165,10 +164,6 @@ public class WavegramClient extends MTProtoClient {
 
   @Override
   public Future<?> start() {
-    if (scheduledExecutorService != null) {
-      scheduledExecutorService.shutdownNow();
-    }
-    scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
     return super.start();
   }
 
@@ -193,10 +188,10 @@ public class WavegramClient extends MTProtoClient {
     if (object instanceof ApiScheme.updates_ updates) {
       for (ApiScheme.UpdateType update : updates.updates) {
         if (update instanceof ApiScheme.updateEncryption updateEncryption) {
-          scheduledExecutorService.submit(() ->
+          executor.submit(() ->
             WavegramClient.this.onUpdateEncryption(updateEncryption));
         } else if (update instanceof ApiScheme.updateNewEncryptedMessage updateNewEncryptedMessage) {
-          scheduledExecutorService.submit(() ->
+          executor.submit(() ->
             WavegramClient.this.onUpdateNewEncryptedMessage(updateNewEncryptedMessage));
         }
       }
@@ -265,9 +260,9 @@ public class WavegramClient extends MTProtoClient {
 
   private void onUpdateEncryption(ApiScheme.updateEncryption updateEncryption) {
     if (updateEncryption.chat instanceof ApiScheme.encryptedChat encryptedChat) {
-      scheduledExecutorService.submit(() -> WavegramClient.this.secretChatAccepted(encryptedChat));
+      executor.submit(() -> WavegramClient.this.secretChatAccepted(encryptedChat));
     } else if (updateEncryption.chat instanceof ApiScheme.encryptedChatRequested encryptedChatRequested) {
-      scheduledExecutorService.submit(() -> WavegramClient.this.acceptSecretChat(encryptedChatRequested));
+      executor.submit(() -> WavegramClient.this.acceptSecretChat(encryptedChatRequested));
     } else if (updateEncryption.chat instanceof ApiScheme.encryptedChatDiscarded encryptedChatDiscarded) {
       secretChats.remove((long) encryptedChatDiscarded.id);
       if (wavegramManager != null) {
@@ -884,7 +879,7 @@ public class WavegramClient extends MTProtoClient {
 
     if (secretChat.outSeqNo == secretChat.lastReKeyOutSeqNo + 100 ||
       secretChat.inSeqNo == secretChat.lastReKeyInSeqNo + 100) {
-      scheduledExecutorService.schedule(() -> {
+      scheduledExecutor.schedule(() -> {
         requestReKey(chatId);
       }, 20, TimeUnit.SECONDS);
     }
@@ -982,7 +977,7 @@ public class WavegramClient extends MTProtoClient {
 
     if (secretChat.outSeqNo == secretChat.lastReKeyOutSeqNo + 100 ||
       secretChat.inSeqNo == secretChat.lastReKeyInSeqNo + 100) {
-      scheduledExecutorService.schedule(() -> {
+      scheduledExecutor.schedule(() -> {
         requestReKey(chatId);
       }, 20, TimeUnit.SECONDS);
     }
@@ -1039,7 +1034,7 @@ public class WavegramClient extends MTProtoClient {
 
   public void sendEncryptedFile(long chatId, String message, InputStream inputStream,
                                 String filename, long size, String tempPath, OnMessage onMessage) {
-    scheduledExecutorService.submit(() -> {
+    scheduledExecutor.submit(() -> {
       byte[] key = CryptoUtils.randomBytes(32);
       byte[] iv = CryptoUtils.randomBytes(32);
       MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
@@ -1059,31 +1054,15 @@ public class WavegramClient extends MTProtoClient {
           return;
         }
 
-        new File(tempPath).mkdirs();
+        Files.createDirectories(Path.of(tempPath));
 
         long fileId = CryptoUtils.randomLong();
         CryptoUtils.AES256IGEEncrypt(inputStream,
           new FileOutputStream(new File(tempPath, filename)), iv, key);
 
-        WavegramUploader wavegramUploader1 = new WavegramUploader(this);
-        wavegramUploader1.setUploadManager(wavegramUploader.getUploadManager());
-        wavegramUploader1.onUpload(new UploadCallback() {
-          @Override
-          public void onStart(long fileId, WavegramUploader.UploadFile uploadFile) {
-            if (wavegramUploader.getUploadCallback() != null) {
-              wavegramUploader.getUploadCallback().onStart(fileId, uploadFile);
-            }
-          }
-
-          @Override
-          public void onProgress(long fileId, long offset, long uploadedBytes, WavegramUploader.UploadFile uploadFile) {
-            if (wavegramUploader.getUploadCallback() != null) {
-              wavegramUploader.getUploadCallback().onProgress(fileId, offset, uploadedBytes, uploadFile);
-            }
-          }
-
-          @Override
-          public void onComplete(long fileId, WavegramUploader.UploadFile uploadFile) {
+        CompletableFuture<WavegramUploader.UploadFile> uploadFuture = wavegramUploader.upload(fileId, new File(tempPath, filename).getAbsolutePath());
+        uploadFuture.whenComplete(((uploadFile, throwable) -> {
+          if (uploadFile != null) {
             byte[] digest = CryptoUtils.MD5(CryptoUtils.concat(key, iv));
             int keyFingerprint = new TLInputStream(
               CryptoUtils.xor(CryptoUtils.substring(digest, 0, 4),
@@ -1146,24 +1125,8 @@ public class WavegramClient extends MTProtoClient {
             decryptedMessage73.media = document143;
 
             sendEncryptedFile(chatId, decryptedMessage73, inputEncryptedFile, onMessage);
-            if (wavegramUploader.getUploadCallback() != null) {
-              wavegramUploader.getUploadCallback().onComplete(fileId, uploadFile);
-            }
           }
-
-          @Override
-          public void onError(long fileId, MTProtoScheme.rpc_error rpcError2) {
-            try {
-              Files.deleteIfExists(Path.of(tempPath, filename));
-            } catch (IOException e) {
-              e.printStackTrace();
-            }
-            if (wavegramUploader.getUploadCallback() != null) {
-              wavegramUploader.getUploadCallback().onError(fileId, rpcError2);
-            }
-          }
-        });
-        wavegramUploader1.upload(fileId, new File(tempPath, filename).getAbsolutePath());
+        }));
       } catch (IOException e) {
         e.printStackTrace();
         rpcError2.error_message = e.getMessage();
@@ -1186,7 +1149,7 @@ public class WavegramClient extends MTProtoClient {
 
   public void sendEncryptedPhoto(long chatId, String message, InputStream inputStream, long size,
                                  String tempPath, OnMessage onMessage) {
-    scheduledExecutorService.submit(() -> {
+    scheduledExecutor.submit(() -> {
       byte[] key = CryptoUtils.randomBytes(32);
       byte[] iv = CryptoUtils.randomBytes(32);
 
@@ -1205,7 +1168,7 @@ public class WavegramClient extends MTProtoClient {
           return;
         }
 
-        new File(tempPath).mkdirs();
+        Files.createDirectories(Path.of(tempPath));
 
         long fileId = CryptoUtils.randomLong();
 
@@ -1243,27 +1206,12 @@ public class WavegramClient extends MTProtoClient {
         long newSize = new File(tempPath, fileId + "-org.jpeg").length();
         Files.deleteIfExists(Path.of(tempPath, fileId + "-org.jpeg"));
 
-        WavegramUploader wavegramUploader1 = new WavegramUploader(this);
-        wavegramUploader1.setUploadManager(wavegramUploader.getUploadManager());
         int finalHeight = height;
         int finalWidth = width;
-        wavegramUploader1.onUpload(new UploadCallback() {
-          @Override
-          public void onStart(long fileId, WavegramUploader.UploadFile uploadFile) {
-            if (wavegramUploader.getUploadCallback() != null) {
-              wavegramUploader.getUploadCallback().onStart(fileId, uploadFile);
-            }
-          }
 
-          @Override
-          public void onProgress(long fileId, long offset, long uploadedBytes, WavegramUploader.UploadFile uploadFile) {
-            if (wavegramUploader.getUploadCallback() != null) {
-              wavegramUploader.getUploadCallback().onProgress(fileId, offset, uploadedBytes, uploadFile);
-            }
-          }
-
-          @Override
-          public void onComplete(long fileId, WavegramUploader.UploadFile uploadFile) {
+        CompletableFuture<WavegramUploader.UploadFile> uploadFuture = wavegramUploader.upload(fileId, new File(tempPath, String.valueOf(fileId)).getAbsolutePath());
+        uploadFuture.whenComplete((uploadFile, throwable) -> {
+          if (uploadFile != null) {
             byte[] digest = CryptoUtils.MD5(CryptoUtils.concat(key, iv));
             int keyFingerprint = new TLInputStream(
               CryptoUtils.xor(CryptoUtils.substring(digest, 0, 4),
@@ -1320,25 +1268,8 @@ public class WavegramClient extends MTProtoClient {
             decryptedMessage73.media = photo45;
 
             sendEncryptedFile(chatId, decryptedMessage73, inputEncryptedFile, onMessage);
-
-            if (wavegramUploader.getUploadCallback() != null) {
-              wavegramUploader.getUploadCallback().onComplete(fileId, uploadFile);
-            }
-          }
-
-          @Override
-          public void onError(long fileId, MTProtoScheme.rpc_error rpcError2) {
-            try {
-              Files.deleteIfExists(Path.of(tempPath, String.valueOf(fileId)));
-            } catch (IOException e) {
-              e.printStackTrace();
-            }
-            if (wavegramUploader.getUploadCallback() != null) {
-              wavegramUploader.getUploadCallback().onError(fileId, rpcError2);
-            }
           }
         });
-        wavegramUploader1.upload(fileId, new File(tempPath, String.valueOf(fileId)).getAbsolutePath());
       } catch (IOException e) {
         e.printStackTrace();
       }
@@ -1431,16 +1362,18 @@ public class WavegramClient extends MTProtoClient {
     this.secretMessageCallback = secretMessageCallback;
   }
 
-  public void sendCode(String phoneNumber, OnMessage onMessage) {
+  public CompletableFuture<TLObject> sendCode(String phoneNumber, OnMessage onMessage) {
+    CompletableFuture<TLObject> future = new CompletableFuture<>();
     if (wavegramManager != null) {
       int[] loggedInDcs = wavegramManager.getLoggedInDcs();
       if (loggedInDcs != null && wavegramManager.getUserId() != -1 && Arrays.stream(loggedInDcs)
         .anyMatch((i) -> i == dcId)) {
-        MTProtoScheme.rpc_error rpcError2 = new MTProtoScheme.rpc_error();
-        rpcError2.error_code = -1;
-        rpcError2.error_message = "USER_ALREADY_LOGGED_IN";
-        onMessage.object(rpcError2);
-        return;
+        MTProtoScheme.rpc_error rpcError = new MTProtoScheme.rpc_error();
+        rpcError.error_code = -1;
+        rpcError.error_message = "USER_ALREADY_LOGGED_IN";
+        onMessage.object(rpcError);
+        future.completeExceptionally(new RpcException(rpcError));
+        return future;
       }
     }
     ApiScheme.auth.sendCode sendCode = new ApiScheme.auth.sendCode();
@@ -1457,27 +1390,42 @@ public class WavegramClient extends MTProtoClient {
 
     executeRpc(sendCode, RpcOptions.build().callback(object -> {
       if (object instanceof ApiScheme.auth.sentCode sentCode) {
-        onMessage.object(sentCode);
-      } else if (object instanceof MTProtoScheme.rpc_error rpcError2) {
-        if (ApiError.contains("PHONE_MIGRATE_X", rpcError2.error_message)) {
-          int dcId = ApiError.getInt(rpcError2.error_message);
+        if (onMessage != null) {
+          onMessage.object(sentCode);
+        }
+        future.complete(sentCode);
+      } else if (object instanceof MTProtoScheme.rpc_error rpcError) {
+        if (ApiError.contains("PHONE_MIGRATE_X", rpcError.error_message)) {
+          int dcId = ApiError.getInt(rpcError.error_message);
           if (dcId != -1) {
             switchDc(dcId);
-            scheduledExecutorService.submit(() -> sendCode(phoneNumber, onMessage));
+            CompletableFuture<TLObject> innerFuture = sendCode(phoneNumber, onMessage);
+            try {
+              future.complete(innerFuture.get());
+            } catch (ExecutionException e) {
+              future.completeExceptionally(e.getCause());
+            } catch (Exception e) {
+              future.completeExceptionally(e);
+            }
           }
-        } else if (ApiError.contains("NETWORK_MIGRATE_X", rpcError2.error_message)) {
-          int dcId = ApiError.getInt(rpcError2.error_message);
+        } else if (ApiError.contains("NETWORK_MIGRATE_X", rpcError.error_message)) {
+          int dcId = ApiError.getInt(rpcError.error_message);
           if (dcId != -1) {
             switchDc(dcId);
           }
         } else {
-          onMessage.object(object);
+          if (onMessage != null) {
+            onMessage.object(object);
+          }
+          future.complete(rpcError);
         }
       }
     }));
+
+    return future;
   }
 
-  public Future<TLObject> signIn(String phoneNumber, String phoneCodeHash, String phoneCode) {
+  public RpcFuture signIn(String phoneNumber, String phoneCodeHash, String phoneCode) {
     ApiScheme.auth.signIn signIn = new ApiScheme.auth.signIn();
     signIn.phone_number = phoneNumber;
     signIn.phone_code_hash = phoneCodeHash;
@@ -1491,32 +1439,34 @@ public class WavegramClient extends MTProtoClient {
             wavegramManager.addLoggedInDcId(dcId);
           }
         }
-        updateScheduledFuture = scheduledExecutorService.scheduleAtFixedRate(() -> {
+        updateScheduledFuture = scheduledExecutor.scheduleAtFixedRate(() -> {
           executeRpc(new ApiScheme.updates.getState());
         }, UPDATE_DELAY_MIN, UPDATE_DELAY_MIN, TimeUnit.MINUTES);
       }
     }));
   }
 
-  public Future<TLObject> signInAsBot(String botToken, OnMessage onMessage) {
-    ApiScheme.auth.importBotAuthorization authorization = new ApiScheme.auth.importBotAuthorization();
-    authorization.api_hash = apiHash;
-    authorization.api_id = apiId;
-    authorization.bot_auth_token = botToken;
+  public RpcFuture signInAsBot(String botToken, OnMessage onMessage) {
+    ApiScheme.auth.importBotAuthorization importBotAuthorization = new ApiScheme.auth.importBotAuthorization();
+    importBotAuthorization.api_hash = apiHash;
+    importBotAuthorization.api_id = apiId;
+    importBotAuthorization.bot_auth_token = botToken;
 
-    return executeRpc(authorization, RpcOptions.build().callback((object) -> {
-      if (object instanceof ApiScheme.auth.authorization authorization2) {
-        if (authorization2.user instanceof ApiScheme.user user) {
+    return executeRpc(importBotAuthorization, RpcOptions.build().callback((object) -> {
+      if (object instanceof ApiScheme.auth.authorization authorization) {
+        if (authorization.user instanceof ApiScheme.user user) {
           if (wavegramManager != null) {
             wavegramManager.setUser(dcId, user.id, false);
             wavegramManager.addLoggedInDcId(dcId);
           }
         }
-        updateScheduledFuture = scheduledExecutorService.scheduleAtFixedRate(() -> {
+        updateScheduledFuture = scheduledExecutor.scheduleAtFixedRate(() -> {
           executeRpc(new ApiScheme.updates.getState());
         }, UPDATE_DELAY_MIN, UPDATE_DELAY_MIN, TimeUnit.MINUTES);
       }
-      onMessage.object(object);
+      if (onMessage != null) {
+        onMessage.object(object);
+      }
     }));
   }
 
@@ -1619,7 +1569,6 @@ public class WavegramClient extends MTProtoClient {
   public void logout() {
     if (wavegramManager != null) {
       if (wavegramManager.getUserId() == -1) {
-        System.err.println(TAG + ".signIn: Not logged in");
         return;
       }
     }
@@ -1639,9 +1588,6 @@ public class WavegramClient extends MTProtoClient {
   @Override
   public void close() {
     super.close();
-    if (scheduledExecutorService != null) {
-      scheduledExecutorService.shutdownNow();
-    }
     wavegramUploader.close();
     wavegramDownloader.close();
   }

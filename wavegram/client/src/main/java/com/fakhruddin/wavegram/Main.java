@@ -2,24 +2,24 @@ package com.fakhruddin.wavegram;
 
 import com.fakhruddin.mtproto.AuthKey;
 import com.fakhruddin.mtproto.client.ProtoCallback;
+import com.fakhruddin.mtproto.client.RpcFuture;
 import com.fakhruddin.mtproto.client.TransportError;
 import com.fakhruddin.mtproto.protocol.IntermediateProtocol;
 import com.fakhruddin.mtproto.tl.MTProtoScheme;
 import com.fakhruddin.mtproto.tl.TLContext;
 import com.fakhruddin.mtproto.tl.TLObject;
-import com.fakhruddin.mtproto.tl.TLVector;
 import com.fakhruddin.mtproto.utils.CryptoUtils;
 import com.fakhruddin.wavegram.client.*;
 import com.fakhruddin.wavegram.tl.ApiContext;
-import com.fakhruddin.wavegram.tl.ApiError;
 import com.fakhruddin.wavegram.tl.ApiScheme;
 import com.fakhruddin.wavegram.tl.ApiSecretScheme;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.lang.management.ManagementFactory;
+import java.nio.file.Path;
 import java.util.Scanner;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CompletableFuture;
 
 public class Main {
   private static final String TAG = Main.class.getSimpleName();
@@ -131,100 +131,138 @@ public class Main {
     });
     wavegramClient.onUpload(new UploadCallback() {
       @Override
-      public void onStart(long fileId, WavegramUploader.UploadFile uploadFile) {
-        System.out.println(TAG + ".onStart: " + uploadFile);
+      public void onStart(WavegramUploader.UploadFile uploadFile) {
       }
 
       @Override
-      public void onProgress(long fileId, long offset, long uploadedBytes, WavegramUploader.UploadFile uploadFile) {
-        System.out.println(TAG + ".onProgress: " + fileId + " " + offset + " " + uploadedBytes +
-          " " + uploadFile);
+      public void onProgress(WavegramUploader.UploadFile uploadFile, long offset, long uploadedBytes) {
       }
 
       @Override
-      public void onComplete(long fileId, WavegramUploader.UploadFile uploadFile) {
-        System.out.println(TAG + ".onComplete: " + uploadFile);
-
+      public void onComplete(WavegramUploader.UploadFile uploadFile) {
         ApiScheme.messages.sendMedia sendMedia = new ApiScheme.messages.sendMedia();
-        sendMedia.message = "Test file";
+        sendMedia.message = "Upload test";
         sendMedia.random_id = CryptoUtils.randomLong();
         sendMedia.peer = new ApiScheme.inputPeerSelf();
         ApiScheme.inputMediaUploadedDocument uploadedDocument = new ApiScheme.inputMediaUploadedDocument();
-        sendMedia.media = uploadedDocument;
         uploadedDocument.force_file = true;
-        uploadedDocument.attributes = new TLVector<>();
-        if (uploadFile.size > WavegramUploader.MIN_LARGE_FILE_SIZE) {
+        String filename = uploadFile.filepath != null ? Path.of(uploadFile.filepath).getFileName().toString() : "test.bin";
+        if (uploadFile.size > WavegramUploader.MIN_LARGE_FILE_SIZE || uploadFile.size <= 0) {
           ApiScheme.inputFileBig inputFileBig = new ApiScheme.inputFileBig();
           inputFileBig.id = uploadFile.fileId;
           inputFileBig.parts = uploadFile.fileTotalParts;
-          inputFileBig.name = "Test";
+          inputFileBig.name = filename;
           uploadedDocument.file = inputFileBig;
         } else {
           ApiScheme.inputFile inputFile = new ApiScheme.inputFile();
           inputFile.id = uploadFile.fileId;
           inputFile.parts = uploadFile.fileTotalParts;
-          inputFile.name = "Test";
+          inputFile.name = filename;
+          inputFile.md5_checksum = "";
           uploadedDocument.file = inputFile;
         }
         uploadedDocument.mime_type = "application/octet-stream";
+
+        ApiScheme.documentAttributeFilename attributeFilename = new ApiScheme.documentAttributeFilename();
+        attributeFilename.file_name = filename;
+
+        sendMedia.media = uploadedDocument;
+        uploadedDocument.attributes.add(attributeFilename);
+
         wavegramClient.executeRpc(sendMedia);
       }
 
       @Override
-      public void onError(long fileId, MTProtoScheme.rpc_error rpcError2) {
-        System.err.println(TAG + ".onError: " + fileId + " " + rpcError2);
+      public void onError(WavegramUploader.UploadFile uploadFile, MTProtoScheme.rpc_error rpcError2) {
       }
     });
 
     wavegramClient.start();
 
-    if (!wavegramClient.isLoggedIn()) {
-      //User login
-      logger.info("Enter phone number: ");
+    while (true) {
+      logger.info("Enter command: ");
       Scanner scanner = new Scanner(System.in);
-      String phoneNumber = scanner.nextLine();
-      wavegramClient.sendCode(phoneNumber, object -> {
-        if (object instanceof ApiScheme.auth.sentCode sentCode) {
+      String cmd = scanner.nextLine();
+      if (cmd.equals("exit")) {
+        break;
+      } else if (cmd.equals("login")) {
+        logger.info("Enter phone number: ");
+        String phoneNumber = scanner.nextLine();
+        CompletableFuture<TLObject> future = wavegramClient.sendCode(phoneNumber, null);
+        TLObject result = future.get();
+        if (result instanceof ApiScheme.auth.sentCode sentCode) {
           while (true) {
-            System.out.print(TAG + ".main: Enter phone code: ");
+            logger.info("Enter code: ");
             String phoneCode = scanner.nextLine();
-            try {
-              TLObject authorization = wavegramClient.signIn(phoneNumber, sentCode.phone_code_hash, phoneCode).get();
-              if (authorization instanceof ApiScheme.auth.authorization authorization2) {
-                if (authorization2.user instanceof ApiScheme.user user) {
-                  logger.info("You are logged in as {} {} ({})", user.first_name, user.last_name, user.username);
-                }
-                break;
-              } else if (authorization instanceof MTProtoScheme.rpc_error rpcError) {
-                if (rpcError.error_message.equals("PHONE_CODE_EMPTY") ||
-                  rpcError.error_message.equals("PHONE_CODE_EXPIRED") ||
-                  rpcError.error_message.equals("PHONE_CODE_INVALID")
-                ) {
-                  continue;
-                } else {
-                  break;
-                }
+            TLObject singInResult = wavegramClient.signIn(phoneNumber, sentCode.phone_code_hash, phoneCode).get();
+            if (singInResult instanceof ApiScheme.auth.authorization authorization) {
+              if (authorization.user instanceof ApiScheme.user user) {
+                logger.info("You are logged in as {} {} ({})", user.first_name, user.last_name, user.username);
               }
-            } catch (InterruptedException | ExecutionException e) {
-              logger.error(e);
+              break;
+            } else if (singInResult instanceof MTProtoScheme.rpc_error rpcError) {
+              if (rpcError.error_message.equals("PHONE_CODE_EMPTY") ||
+                rpcError.error_message.equals("PHONE_CODE_EXPIRED") ||
+                rpcError.error_message.equals("PHONE_CODE_INVALID")
+              ) {
+                continue;
+              } else {
+                break;
+              }
             }
           }
-        } else if (object instanceof MTProtoScheme.rpc_error rpcError) {
-          System.err.println(TAG + ".main: " + ApiError.getDescription(rpcError.error_message));
         }
-      });
-
-
-      //Bot login
-      /*logger.info("Enter bot token: ");
-      String botToken = scanner.nextLine();
-      wavegramClient.signInAsBot(botToken, object -> {
-        if (object instanceof ApiScheme.auth.authorization authorization) {
+      } else if (cmd.equals("bot-login")) {
+        logger.info("Enter bot token: ");
+        String botToken = scanner.nextLine();
+        RpcFuture rpcFuture = wavegramClient.signInAsBot(botToken, null);
+        if (rpcFuture.get() instanceof ApiScheme.auth.authorization authorization) {
           if (authorization.user instanceof ApiScheme.user user) {
             logger.info("You are logged in as {} {} ({})", user.first_name, user.last_name, user.username);
           }
         }
-      });*/
+      } else if (cmd.equals("download")) {
+        logger.info("Enter download command: ");
+        String opt = scanner.next();
+        switch (opt) {
+          case "pause" -> {
+            long fileId = scanner.nextLong();
+            wavegramClient.getWavegramDownloader().pause(fileId);
+          }
+          case "resume" -> {
+            long fileId = scanner.nextLong();
+            wavegramClient.getWavegramDownloader().resume(fileId);
+          }
+          case "remove" -> {
+            long fileId = scanner.nextLong();
+            wavegramClient.getWavegramDownloader().remove(fileId);
+          }
+        }
+      } else if (cmd.equals("upload")) {
+        logger.info("Enter upload command: ");
+        String opt = scanner.next();
+        switch (opt) {
+          case "pause" -> {
+            long fileId = scanner.nextLong();
+            wavegramClient.getWavegramUploader().pause(fileId);
+          }
+          case "resume" -> {
+            long fileId = scanner.nextLong();
+            wavegramClient.getWavegramUploader().resume(fileId);
+          }
+          case "remove" -> {
+            long fileId = scanner.nextLong();
+            wavegramClient.getWavegramUploader().remove(fileId);
+          }
+          case "upload" -> {
+            long fileId = CryptoUtils.randomLong();
+            String filepath = scanner.nextLine().trim();
+            wavegramClient.getWavegramUploader().upload(fileId, filepath);
+          }
+        }
+      } else if (cmd.equals("close")) {
+        wavegramClient.close();
+      }
     }
 
   }
