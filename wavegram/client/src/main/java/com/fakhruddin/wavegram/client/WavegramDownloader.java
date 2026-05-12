@@ -257,6 +257,10 @@ public class WavegramDownloader {
           threadCount = 1;
         }
 
+        int minChunkSize = stream ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE;
+        downloadFile.partSize = Math.min(downloadFile.partSize, MAX_CHUNK_SIZE);
+        downloadFile.partSize = Math.max(minChunkSize, downloadFile.partSize / minChunkSize * minChunkSize);
+
         CountDownLatch firstLatch = new CountDownLatch(1);
 
         AtomicReference<MTProtoScheme.rpc_error> rpcError = new AtomicReference<>(new MTProtoScheme.rpc_error());
@@ -379,24 +383,12 @@ public class WavegramDownloader {
             getFile.cdn_supported = true;
             getFile.location = downloadFile.inputFileLocation;
             getFile.offset = downloadFile.offset;
-            downloadFile.partSize -= downloadFile.partSize % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-            if (downloadFile.partSize < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
-              downloadFile.partSize = (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-            } else if (downloadFile.partSize > MAX_CHUNK_SIZE) {
-              downloadFile.partSize = MAX_CHUNK_SIZE;
-            }
-            long finalPartSize = downloadFile.partSize;
 
-            while (MAX_CHUNK_SIZE % finalPartSize != 0 || finalPartSize % MIN_CHUNK_SIZE != 0) {
-              finalPartSize -= (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-            }
             long currentEndPos = -1;
             if (downloadFile.size > 0) {
-              long lengthPerThread = downloadFile.size / finalThreadCount;
-              lengthPerThread -= lengthPerThread % finalPartSize;
+              long lengthPerThread = (downloadFile.size - downloadFile.offset) / finalThreadCount;
               getFile.offset += lengthPerThread * finalI;
-              lengthPerThread += lengthPerThread * finalI;
-              currentEndPos = lengthPerThread;
+              currentEndPos = downloadFile.offset + lengthPerThread * (finalI + 1);
               if (finalI == finalThreadCount - 1) {
                 currentEndPos = downloadFile.size;
               }
@@ -415,41 +407,25 @@ public class WavegramDownloader {
             }
 
             while ((currentEndPos < 0 || getFile.offset < currentEndPos) && downloadFile.state == DownloadFile.FILE_DOWNLOADING) {
+              long bytesOffset = getFile.offset % minChunkSize;
+              getFile.offset -= bytesOffset;
+              getFile.limit = (int) downloadFile.partSize;
 
-              long bytesOffset = (getFile.offset % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE));
-              if (getFile.offset < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
-                bytesOffset = (int) getFile.offset;
-                getFile.offset = 0;
-              } else {
-                getFile.offset -= bytesOffset;
-              }
-              long tempPartSize = downloadFile.partSize;
-              if ((getFile.offset + downloadFile.partSize) > MAX_CHUNK_SIZE) {
-                tempPartSize = ((getFile.offset + downloadFile.partSize) % MAX_CHUNK_SIZE) < downloadFile.partSize ?
-                  downloadFile.partSize - ((getFile.offset + downloadFile.partSize) % MAX_CHUNK_SIZE) : downloadFile.partSize;
-              }
-              tempPartSize -= tempPartSize % (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-              if (tempPartSize < (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE)) {
-                tempPartSize = (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-              } else if (tempPartSize > MAX_CHUNK_SIZE) {
-                tempPartSize = MAX_CHUNK_SIZE;
-              }
-              if ((getFile.offset + tempPartSize) > MAX_CHUNK_SIZE) {
-                while (MAX_CHUNK_SIZE % tempPartSize != 0 || tempPartSize % MIN_CHUNK_SIZE != 0) {
-                  tempPartSize -= (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
-                }
-              } else {
-                while (MAX_CHUNK_SIZE % tempPartSize != 0 || tempPartSize % MIN_CHUNK_SIZE != 0) {
-                  tempPartSize += (getFile.precise ? MIN_CHUNK_SIZE_PRECISE : MIN_CHUNK_SIZE);
+              long chunkEnd = (getFile.offset / MAX_CHUNK_SIZE + 1) * MAX_CHUNK_SIZE;
+              long overflow = getFile.offset + getFile.limit - chunkEnd;
+              if (overflow > 0) {
+                long adjust = (overflow + minChunkSize - 1) / minChunkSize * minChunkSize;
+                if (getFile.offset % MAX_CHUNK_SIZE != 0) {
+                  getFile.offset -= adjust;
+                  bytesOffset += adjust;
+                } else {
+                  getFile.limit -= (int) adjust;
                 }
               }
-              long bytesLength = tempPartSize;
-              getFile.limit = (int) tempPartSize;
 
-              if (currentEndPos > 0 && getFile.offset + getFile.limit >= currentEndPos) {
+              long bytesLength = getFile.limit;
+              if (currentEndPos > 0 && getFile.offset + getFile.limit > currentEndPos) {
                 bytesLength -= (getFile.offset + getFile.limit) - currentEndPos;
-              } else {
-                bytesLength = getFile.limit;
               }
 
               if (fileCdnRedirect.get() != null) {
