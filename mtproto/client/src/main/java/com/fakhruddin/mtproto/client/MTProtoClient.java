@@ -49,7 +49,6 @@ public class MTProtoClient extends TcpSocket {
 
   public int sentMsgCacheLimit = 300;
   public int recvMsgCacheLimit = 300;
-  public static final long RPC_RESPONSE_TIMEOUT = 1000 * 20;
   public static final int MAX_MSG_ACK_ID = 5;
   protected final Map<Long, MessageInfo> sentMessages = Collections.synchronizedMap(new LinkedHashMap<>());
   protected final Map<Long, MTMessage> recvMessages = Collections.synchronizedMap(new LinkedHashMap<>());
